@@ -1,8 +1,10 @@
 (load "/home/lain/quicklisp/setup.lisp")
 (ql:quickload :hunchentoot :silent t)
+(ql:quickload :sqlite :silent t)
 (load "modules/yggdrasil.lisp")
 (load "modules/ipfs.lisp")
 (load "modules/ollama.lisp")
+(load "modules/sqlite.lisp")
 
 (defparameter *url-price* "https://api.dexscreener.com/latest/dex/tokens/E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump")
 
