@@ -9,3 +9,9 @@ solana:
 
 crypto:
   name: crypto
+
+cyberia:
+  name: cyberia
+
+telegram:
+  name: telegram

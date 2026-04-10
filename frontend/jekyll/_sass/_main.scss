@@ -149,7 +149,7 @@ ul.topbar {
 	ul {
 		li {
 			max-width: 27ch;
-			overflow: hidden;
+			// overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
@@ -209,7 +209,7 @@ ul.topbar {
 	h1 {
 		font-size: 20px;
 		font-weight: 700;
-		margin: 50px 0 10px 0;
+		margin: 25px 0 10px 0;
 	}
 
 	h2 {
