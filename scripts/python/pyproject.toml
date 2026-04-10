@@ -1,0 +1,12 @@
+[project]
+name = "telegram-airdrop-bot"
+version = "0.1.0"
+dependencies = [
+    "python-telegram-bot>=21.0",
+    "web3>=6.0.0",
+    "sqlalchemy>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = []
