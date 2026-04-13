@@ -5,18 +5,18 @@ namespace App\Actions\Wallet;
 use App\Actions\Teams\CreateTeam;
 use App\Models\User;
 use App\Models\WalletNonce;
+use Elliptic\EC;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Simplito\Elliptic\Secp256k1;
 
 class VerifyWalletSignature
 {
-    private Secp256k1 $secp256k1;
+    private EC $ec;
 
     public function __construct(
         private CreateTeam $createTeam
     ) {
-        $this->secp256k1 = new Secp256k1;
+        $this->ec = new EC('secp256k1');
     }
 
     public function handle(string $walletAddress, string $signature): User
@@ -52,18 +52,9 @@ class VerifyWalletSignature
 
         $recoveryParam = $this->getRecoveryParam($msgHash, $sig);
 
-        $point = $this->secp256k1->pointFromSignature(
-            $msgHash,
-            $sig['r'],
-            $sig['s'],
-            $recoveryParam
-        );
+        $keyPair = $this->ec->keyFromPublic($this->ec->recoverPubKey($msgHash, $sig, $recoveryParam)->encode('array'));
 
-        if (! $point) {
-            throw new \Exception('Could not recover public key from signature.');
-        }
-
-        $publicKey = $point->encode('array');
+        $publicKey = $keyPair->getPublic()->encode('array');
         if (count($publicKey) === 65 && $publicKey[0] === 0x04) {
             array_shift($publicKey);
         }
@@ -91,18 +82,13 @@ class VerifyWalletSignature
 
     private function getRecoveryParam(string $msgHash, array $sig): int
     {
-        $publicKey1 = $this->secp256k1->recoverPubKey($msgHash, [
-            'r' => $sig['r'],
-            's' => $sig['s'],
-        ], 0);
-
         $msgHashInt = gmp_init($msgHash, 16);
         $r = gmp_init($sig['r'], 16);
         $s = gmp_init($sig['s'], 16);
 
         for ($recId = 0; $recId < 4; $recId++) {
             try {
-                $pubKey = $this->secp256k1->recoverPubKey($msgHashInt, [
+                $pubKey = $this->ec->recoverPubKey($msgHashInt, [
                     'r' => $r,
                     's' => $s,
                 ], $recId);
@@ -112,17 +98,9 @@ class VerifyWalletSignature
                     array_shift($p);
                 }
 
-                $addr1 = '0x'.substr($this->keccak256($p), 24);
+                $addr = '0x'.substr($this->keccak256($p), 24);
 
-                $pubKey1Array = $publicKey1->encode('array');
-                if (count($pubKey1Array) === 65 && $pubKey1Array[0] === 0x04) {
-                    array_shift($pubKey1Array);
-                }
-                $addr2 = '0x'.substr($this->keccak256($pubKey1Array), 24);
-
-                if ($addr1 === $addr2) {
-                    return $recId;
-                }
+                return $recId;
             } catch (\Exception $e) {
                 continue;
             }

@@ -24,17 +24,58 @@ export type TokenBalance = {
     formatted: string;
 };
 
-export const useWallet = () => {
-    const isConnected = ref(false);
-    const isConnecting = ref(false);
-    const address = ref<string | null>(null);
-    const balance = ref<string | null>(null);
-    const chainId = ref<number | null>(null);
-    const error = ref<string | null>(null);
-    const cyberBalance = ref<TokenBalance | null>(null);
+// Global singleton state — persists across component re-renders and page navigations
+const isConnected = ref(false);
+const isConnecting = ref(false);
+const address = ref<string | null>(null);
+const balance = ref<string | null>(null);
+const chainId = ref<number | null>(null);
+const error = ref<string | null>(null);
+const cyberBalance = ref<TokenBalance | null>(null);
+let listenersSetup = false;
+let restored = false;
 
+export const useWallet = () => {
     const isMetaMaskInstalled = (): boolean => {
         return typeof window !== 'undefined' && !!window.ethereum?.isMetaMask;
+    };
+
+    /**
+     * Restore wallet state from the authenticated user's saved wallet_address
+     * and try to silently reconnect via MetaMask (eth_accounts — no popup).
+     * Should be called once on app mount.
+     */
+    const restore = async (savedAddress?: string | null): Promise<void> => {
+        if (restored || isConnected.value) return;
+        restored = true;
+
+        // If user has a wallet_address saved in DB, set it immediately
+        // so the UI shows the address even before MetaMask responds
+        if (savedAddress) {
+            address.value = savedAddress;
+            isConnected.value = true;
+        }
+
+        // Try silent reconnect through MetaMask (no popup)
+        if (isMetaMaskInstalled()) {
+            try {
+                const accounts = (await window.ethereum!.request({
+                    method: 'eth_accounts',
+                })) as string[];
+
+                if (accounts.length > 0) {
+                    address.value = accounts[0];
+                    isConnected.value = true;
+                    setupListeners();
+                    // Fire-and-forget — don't block UI
+                    fetchBalance();
+                    fetchChainId();
+                    fetchCyberBalance();
+                }
+            } catch {
+                // MetaMask not available or rejected — keep savedAddress if any
+            }
+        }
     };
 
     const connect = async (): Promise<string | null> => {
@@ -153,9 +194,10 @@ export const useWallet = () => {
     };
 
     const setupListeners = (): void => {
-        if (!window.ethereum) return;
+        if (!window.ethereum || listenersSetup) return;
+        listenersSetup = true;
 
-        const handleAccountsChanged = (accounts: unknown) => {
+        window.ethereum.on('accountsChanged', (accounts: unknown) => {
             const accs = accounts as string[];
             if (accs.length === 0) {
                 disconnect();
@@ -164,29 +206,26 @@ export const useWallet = () => {
                 fetchBalance();
                 fetchCyberBalance();
             }
-        };
+        });
 
-        const handleChainChanged = (): void => {
+        window.ethereum.on('chainChanged', () => {
             fetchChainId();
             fetchBalance();
             fetchCyberBalance();
-        };
+        });
 
-        const handleDisconnect = (): void => {
+        window.ethereum.on('disconnect', () => {
             disconnect();
-        };
-
-        window.ethereum.on('accountsChanged', handleAccountsChanged);
-        window.ethereum.on('chainChanged', handleChainChanged);
-        window.ethereum.on('disconnect', handleDisconnect);
+        });
     };
 
     const removeListeners = (): void => {
         if (!window.ethereum) return;
+        listenersSetup = false;
 
-        window.ethereum.removeListener('accountsChanged', () => {});
-        window.ethereum.removeListener('chainChanged', () => {});
-        window.ethereum.removeListener('disconnect', () => {});
+        window.ethereum.removeAllListeners?.('accountsChanged');
+        window.ethereum.removeAllListeners?.('chainChanged');
+        window.ethereum.removeAllListeners?.('disconnect');
     };
 
     const formatAddress = (addr: string, chars = 4): string => {
@@ -204,6 +243,7 @@ export const useWallet = () => {
         isMetaMaskInstalled,
         connect,
         disconnect,
+        restore,
         signMessage,
         fetchBalance,
         fetchCyberBalance,

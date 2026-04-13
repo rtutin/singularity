@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid, Link as LinkIcon, Folder, Wallet } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { BookOpen, FolderGit2, LayoutGrid, Link as LinkIcon, Folder, Vote, Wallet } from 'lucide-vue-next';
+import { computed, onMounted } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -25,6 +25,12 @@ const page = usePage();
 const wallet = useWallet();
 const walletAuth = useWalletAuth();
 
+// Restore wallet state from saved user wallet_address on mount
+onMounted(() => {
+    const user = page.props.auth?.user as { wallet_address?: string | null } | undefined;
+    wallet.restore(user?.wallet_address);
+});
+
 const dashboardUrl = computed(() =>
     page.props.currentTeam ? dashboard(page.props.currentTeam.slug).url : '/',
 );
@@ -44,6 +50,11 @@ const mainNavItems = computed<NavItem[]>(() => [
         title: 'Categories',
         href: '/categories',
         icon: Folder,
+    },
+    {
+        title: 'DAO',
+        href: '/dao',
+        icon: Vote,
     },
 ]);
 

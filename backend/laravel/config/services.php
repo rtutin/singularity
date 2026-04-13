@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'ethereum' => [
+        'rpc_url' => env('CYBERIA_RPC_URL'),
+    ],
+
 ];
