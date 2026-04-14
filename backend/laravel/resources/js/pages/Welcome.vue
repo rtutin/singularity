@@ -1,29 +1,18 @@
 <script setup lang="ts">
-import { Head, Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Wallet } from 'lucide-vue-next';
+import { computed, onMounted } from 'vue';
+import { useWallet } from '@/composables/useWallet';
+import { useWalletAuth } from '@/composables/useWalletAuth';
 import { dashboard, login, register } from '@/routes';
 
 withDefaults(
     defineProps<{
         canRegister: boolean;
-        yesOrNo: {
-            answer: string;
-        },
         price: {
-            priceSol: string | null;
-            priceUsd: string | null;
+            priceSol: number;
+            priceUsd: number;
         } | null;
-        cataas: {
-            cat: string;
-            catById: string;
-            catByIdSays: string;
-            catByTag: string;
-            catByTagSays: string;
-            catSays: string;
-            cats: Array<any>;
-            count: null;
-            tags: Array<string>
-        }
     }>(),
     {
         canRegister: true,
@@ -32,10 +21,43 @@ withDefaults(
 );
 
 const page = usePage();
-const dashboardUrl = computed(() => {
-    console.log(page.props)
-    page.props.currentTeam ? dashboard(page.props.currentTeam.slug).url : '/'
+const wallet = useWallet();
+const walletAuth = useWalletAuth();
+
+onMounted(() => {
+    const user = page.props.auth?.user as
+        | { wallet_address?: string | null }
+        | undefined;
+    wallet.restore(user?.wallet_address);
 });
+
+const dashboardUrl = computed(() => {
+    return page.props.currentTeam
+        ? dashboard(page.props.currentTeam.slug).url
+        : '/';
+});
+
+const handleWalletConnect = async () => {
+    const address = await wallet.connect();
+
+    if (address) {
+        try {
+            const { nonce } = await walletAuth.generateNonce(address);
+            const message = `Sign this message to authenticate with your wallet. Nonce: ${nonce}`;
+            const signature = await wallet.signMessage(message);
+
+            if (signature) {
+                const response = await walletAuth.verifySignature(
+                    address,
+                    signature,
+                );
+                router.post('/login/web3', { token: response.token });
+            }
+        } catch {
+            // Error handled by composable
+        }
+    }
+};
 </script>
 
 <template>
@@ -57,7 +79,30 @@ const dashboardUrl = computed(() => {
                 >
                     Dashboard
                 </Link>
-                <template v-else>
+                    <button
+                        class="inline-block rounded-sm border border-transparent px-5 py-1.5 text-sm leading-normal text-[#1b1b18] hover:border-[#19140035] dark:text-[#EDEDEC] dark:hover:border-[#3E3E3A]"
+                        :disabled="wallet.isConnecting.value"
+                        @click="handleWalletConnect"
+                    >
+                        <div class="flex items-center gap-2">
+                            <Wallet class="h-4 w-4" />
+                            <span
+                                v-if="wallet.isConnected.value"
+                                class="font-mono"
+                            >
+                                {{
+                                    wallet.formatAddress(wallet.address.value!)
+                                }}
+                            </span>
+                            <span v-else>
+                                {{
+                                    wallet.isConnecting.value
+                                        ? 'Connecting...'
+                                        : 'Connect Wallet'
+                                }}
+                            </span>
+                        </div>
+                    </button>
                     <Link
                         :href="login()"
                         class="inline-block rounded-sm border border-transparent px-5 py-1.5 text-sm leading-normal text-[#1b1b18] hover:border-[#19140035] dark:text-[#EDEDEC] dark:hover:border-[#3E3E3A]"
@@ -71,24 +116,16 @@ const dashboardUrl = computed(() => {
                     >
                         Register
                     </Link>
-                </template>
             </nav>
         </header>
         <div
-            class="w-full items-center justify-center opacity-100 transition-opacity duration-750 lg:grow starting:opacity-0 text-white"
+            class="w-full items-center justify-center text-white opacity-100 transition-opacity duration-750 lg:grow starting:opacity-0"
         >
-            <div v-if="price" class="mb-4 p-4 bg-gray-800 rounded">
+            <div v-if="price" class="mb-4 rounded bg-gray-800 p-4">
                 <p class="text-lg font-bold">CYBER Token</p>
                 <p>Price SOL: {{ price.priceSol }}</p>
                 <p>Price USD: {{ price.priceUsd }}</p>
             </div>
-            <p>yesno.answer: {{ yesOrNo.answer }}</p>
-            <p><img :src="cataas.cat" alt="cat" /></p>
-            <p><img :src="cataas.catSays" alt="cat" /></p>
-            <p><img :src="cataas.catById" alt="cat" /></p>
-            <p><img :src="cataas.catByIdSays" alt="cat" /></p>
-            <p><img :src="cataas.catByTag" alt="cat" /></p>
-            <p><img :src="cataas.catByTagSays" alt="cat" /></p>
         </div>
         <div class="hidden h-14.5 lg:block"></div>
     </div>

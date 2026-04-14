@@ -13,7 +13,8 @@ class ApiController extends Controller
 {
     public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)
     {
-        return Inertia::render('Welcome', []);
+        $price = $cyber->get();
+        return Inertia::render('Welcome', ['price' => $price]);
     }
 
     // public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)
