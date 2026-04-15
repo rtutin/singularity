@@ -8,7 +8,7 @@ import {
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { ref } from 'vue';
 
-const CYBERIA_RPC = 'http://195.166.164.94:8545';
+const CYBERIA_RPC = 'https://rpc.cyberia.church';
 const CYBERIA_CHAIN_ID = 49406;
 const cyberiaNetwork = new Network('cyberia', CYBERIA_CHAIN_ID);
 
