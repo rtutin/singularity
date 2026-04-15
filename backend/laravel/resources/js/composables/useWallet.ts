@@ -16,7 +16,7 @@ const ERC20_ABI = [
     'function symbol() view returns (string)',
 ];
 
-const CYBER_CONTRACT = '0x14778860E937f509e651192a90589dE711Fb88a9';
+const CYBER_CONTRACT = '0x38Fb766Fa8c03fc098B6Ff74d1Ed1293bDdAcF7f';
 
 export type TokenBalance = {
     symbol: string;

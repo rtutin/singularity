@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\BridgeController;
+use App\Http\Controllers\Api\WalletAttachController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\Auth\Web3LoginController;
 use App\Http\Controllers\CategoryController;
@@ -49,6 +51,15 @@ Route::middleware(['auth'])->group(function () {
 
     // Votes on proposals
     Route::post('proposals/{proposal}/votes', [ProposalVoteController::class, 'store'])->name('proposals.votes.store');
+
+    // Wallet attach/detach
+    Route::post('wallets/evm/attach', [WalletAttachController::class, 'attachEvm'])->name('wallets.evm.attach');
+    Route::post('wallets/solana/attach', [WalletAttachController::class, 'attachSolana'])->name('wallets.solana.attach');
+    Route::delete('wallets/evm/detach', [WalletAttachController::class, 'detachEvm'])->name('wallets.evm.detach');
+    Route::delete('wallets/solana/detach', [WalletAttachController::class, 'detachSolana'])->name('wallets.solana.detach');
+
+    // Bridge
+    Route::post('bridge/submit', [BridgeController::class, 'submit'])->name('bridge.submit');
 });
 
 require __DIR__.'/settings.php';

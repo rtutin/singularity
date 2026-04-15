@@ -33,7 +33,7 @@ class Web3LoginController extends Controller
                 ->with('error', 'Authentication failed.');
         }
 
-        DB::transaction(function () use ($user, $token) {
+        $team = DB::transaction(function () use ($user, $token) {
             $token->delete();
 
             if ($user->current_team_id) {
@@ -51,6 +51,8 @@ class Web3LoginController extends Controller
             request()->session()->regenerate();
 
             auth()->login($user, true);
+
+            return $team;
         });
 
         $redirectUrl = $team

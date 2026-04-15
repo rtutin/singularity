@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BridgeRequest;
 use App\Services\CataasApiService;
 use App\Services\CyberPriceService;
 use App\Services\YesNoApiService;
@@ -14,7 +15,23 @@ class ApiController extends Controller
     public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)
     {
         $price = $cyber->get();
-        return Inertia::render('Welcome', ['price' => $price]);
+
+        $bridgeHistory = [];
+        if (auth()->check()) {
+            $bridgeHistory = BridgeRequest::where('user_id', auth()->id())
+                ->orderByDesc('created_at')
+                ->limit(20)
+                ->get([
+                    'id', 'direction', 'source_chain', 'source_tx_hash',
+                    'sender_address', 'recipient_address', 'amount',
+                    'status', 'destination_tx_hash', 'created_at', 'completed_at',
+                ]);
+        }
+
+        return Inertia::render('Welcome', [
+            'price' => $price,
+            'bridgeHistory' => $bridgeHistory,
+        ]);
     }
 
     // public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)

@@ -8,6 +8,7 @@ use App\Models\WalletNonce;
 use Elliptic\EC;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use kornrunner\Keccak;
 
 class VerifyWalletSignature
 {
@@ -116,9 +117,13 @@ class VerifyWalletSignature
         return $this->keccak256($prefix.$message);
     }
 
-    private function keccak256(string $data): string
+    private function keccak256(string|array $data): string
     {
-        return hash('keccak256', $data);
+        if (is_array($data)) {
+            $data = implode('', array_map('chr', $data));
+        }
+
+        return Keccak::hash($data, 256);
     }
 
     private function authenticateOrRegister(string $walletAddress): User
