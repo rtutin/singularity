@@ -1,8 +1,9 @@
 # Cyberia
 - Website/blog: https://cyberia-temple.github.io
-- X/Twitter: https://x.com/cyberia_chain
+- X/Twitter: https://x.com/cyberia_temple
 - Telegram channel: https://t.me/cyberia_network
 - Telegram chat: https://t.me/cyberia_network_chat
+- CYBER.sol CA: E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump
 
 # Network config
 network name: cyberia
