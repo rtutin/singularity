@@ -24,7 +24,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if (env('APP_ENV', 'local') === 'production') {
+        if (env('APP_ENV') === 'production') {
             URL::forceHttps();
         }
         
