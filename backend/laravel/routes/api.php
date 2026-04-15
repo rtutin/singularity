@@ -23,7 +23,7 @@ Route::get('bridge/{bridgeRequest}/status', [BridgeController::class, 'status'])
 
 // Cyberia RPC proxy (avoids mixed content on HTTPS sites)
 Route::post('rpc/cyberia', function (\Illuminate\Http\Request $request) {
-    $response = Http::post(config('services.ethereum.rpc_url', 'http://195.166.164.94:8545'), $request->all());
+    $response = Http::post(config('services.ethereum.rpc_url', 'https://rpc.cyberia.church'), $request->all());
 
     return response($response->body(), $response->status())
         ->header('Content-Type', 'application/json');
