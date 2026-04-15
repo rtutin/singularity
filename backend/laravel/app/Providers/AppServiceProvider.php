@@ -36,11 +36,19 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function isProduction(): bool
     {
-        $productionHosts = [
+        $productionDomains = [
             'cyberia.church',
         ];
 
-        return in_array(gethostname(), $productionHosts, true);
+        $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? null;
+
+        if ($host !== null) {
+            $host = strtok($host, ':'); // strip port if present
+
+            return in_array($host, $productionDomains, true);
+        }
+
+        return app()->isProduction();
     }
 
     /**
