@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessBridgeRequest;
 use App\Models\BridgeRequest;
 use App\Services\BridgeService;
 use Illuminate\Http\JsonResponse;
@@ -40,6 +41,8 @@ class BridgeController extends Controller
             recipientAddress: $validated['recipient_address'],
             amount: $validated['amount'],
         );
+
+        ProcessBridgeRequest::dispatchSync($bridgeRequest->id);
 
         return response()->json([
             'message' => 'Bridge request submitted',
