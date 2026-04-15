@@ -111,10 +111,7 @@ console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
     return bridge.solanaCyberBalance.value;
 });
 
-// Show all balances the user has
-const evmCyberDisplay = computed(() =>
-    bridge.cyberBalance.value ? parseFloat(bridge.cyberBalance.value).toFixed(4) : null,
-);
+// Show balances
 const evmCyberSolDisplay = computed(() =>
     bridge.cyberSolBalance.value ? parseFloat(bridge.cyberSolBalance.value).toFixed(4) : null,
 );
@@ -130,7 +127,6 @@ const amountExceedsBalance = computed(() => {
 
 const refreshBalances = async () => {
     if (evmWallet.isConnected.value && evmWallet.address.value) {
-        bridge.fetchCyberBalance(evmWallet.address.value);
         bridge.fetchCyberSolBalance(evmWallet.address.value);
     }
     if (solanaWallet.isConnected.value && solanaWallet.address.value) {
@@ -494,13 +490,12 @@ const statusColor = (status: string) => {
                                 )
                             }}
                         </p>
-                        <div
-                            v-if="evmWallet.isConnected.value && (evmCyberDisplay || evmCyberSolDisplay)"
-                            class="mt-0.5 flex gap-2 text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                        <p
+                            v-if="evmWallet.isConnected.value && evmCyberSolDisplay"
+                            class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
                         >
-                            <span v-if="evmCyberDisplay" class="font-mono">{{ evmCyberDisplay }} CYBER</span>
-                            <span v-if="evmCyberSolDisplay" class="font-mono">{{ evmCyberSolDisplay }} CYBER.sol</span>
-                        </div>
+                            {{ evmCyberSolDisplay }} CYBER.sol
+                        </p>
                     </div>
                     <button
                         v-if="
