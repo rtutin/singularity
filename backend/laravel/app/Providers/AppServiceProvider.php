@@ -24,16 +24,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // @TODO: debug later
-        // if (env('APP_ENV') === 'production') {
-            // URL::forceHttps();
-        // }
-
-        if (env('APP_ENV') === 'production') {
+        if ($this->isProduction()) {
             URL::forceHttps();
         }
         
         $this->configureDefaults();
+    }
+
+    /**
+     * Determine if the application is running in production based on hostname.
+     */
+    protected function isProduction(): bool
+    {
+        $productionHosts = [
+            'cyberia.church',
+        ];
+
+        return in_array(gethostname(), $productionHosts, true);
     }
 
     /**
