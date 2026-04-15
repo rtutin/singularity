@@ -109,7 +109,7 @@ class BridgeService
             $amountLamports = bcmul($request->amount, bcpow('10', '9'));
             $amountLamports = explode('.', $amountLamports)[0];
             $anchorDir = Environment::isProduction()
-                ? base_path('/singularity/crypto/anchor')
+                ? '/singularity/crypto/anchor'
                 : base_path('/../../crypto/anchor');
             
             $home = env('HOME', $_SERVER['HOME'] ?? '/home/lain');
