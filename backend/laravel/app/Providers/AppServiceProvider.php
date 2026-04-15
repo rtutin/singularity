@@ -24,9 +24,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if (env('APP_ENV') === 'production') {
+        // @TODO: debug later
+        // if (env('APP_ENV') === 'production') {
             URL::forceHttps();
-        }
+        // }
         
         $this->configureDefaults();
     }
