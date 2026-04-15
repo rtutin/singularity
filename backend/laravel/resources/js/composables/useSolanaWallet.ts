@@ -29,13 +29,54 @@ let restored = false;
 const getPhantom = (): PhantomProvider | null => {
     if (typeof window === 'undefined') return null;
 
-    const provider = (window as unknown as { phantom?: { solana?: PhantomProvider } }).phantom?.solana;
+    // Phantom injects at window.phantom.solana or window.solana
+    const provider =
+        (window as unknown as { phantom?: { solana?: PhantomProvider } }).phantom?.solana ??
+        (window as unknown as { solana?: PhantomProvider }).solana;
 
     if (provider?.isPhantom) {
         return provider;
     }
 
     return null;
+};
+
+/**
+ * Wait for Phantom to be injected (it may load after page scripts).
+ * Returns the provider or null after timeout.
+ */
+const waitForPhantom = (timeoutMs = 3000): Promise<PhantomProvider | null> => {
+    return new Promise((resolve) => {
+        const existing = getPhantom();
+        if (existing) { resolve(existing); return; }
+
+        let resolved = false;
+        const handler = () => {
+            if (resolved) return;
+            const p = getPhantom();
+            if (p) { resolved = true; resolve(p); }
+        };
+
+        window.addEventListener('phanton#initialized', handler);
+
+        // Also poll in case the event was missed
+        const interval = setInterval(() => {
+            const p = getPhantom();
+            if (p) {
+                resolved = true;
+                clearInterval(interval);
+                resolve(p);
+            }
+        }, 100);
+
+        setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                clearInterval(interval);
+                resolve(null);
+            }
+        }, timeoutMs);
+    });
 };
 
 export const useSolanaWallet = () => {
@@ -56,7 +97,7 @@ export const useSolanaWallet = () => {
             isConnected.value = true;
         }
 
-        const phantom = getPhantom();
+        const phantom = await waitForPhantom();
         if (phantom) {
             try {
                 const resp = await phantom.connect({ onlyIfTrusted: true });
@@ -70,7 +111,7 @@ export const useSolanaWallet = () => {
     };
 
     const connect = async (): Promise<string | null> => {
-        const phantom = getPhantom();
+        const phantom = await waitForPhantom();
 
         if (!phantom) {
             error.value =
