@@ -25,4 +25,9 @@ export default defineConfig({
             formVariants: true,
         }),
     ],
+    resolve: {
+        alias: {
+            buffer: 'buffer/',
+        },
+    },
 });

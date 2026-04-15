@@ -3,6 +3,8 @@ export type User = {
     name: string;
     email: string;
     avatar?: string;
+    wallet_address?: string | null;
+    solana_wallet_address?: string | null;
     email_verified_at: string | null;
     created_at: string;
     updated_at: string;

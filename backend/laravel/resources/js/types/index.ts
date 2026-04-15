@@ -3,4 +3,5 @@ export * from './navigation';
 export * from './teams';
 export * from './links';
 export * from './categories';
+export * from './dao';
 export * from './ui';

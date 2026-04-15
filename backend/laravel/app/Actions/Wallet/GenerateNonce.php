@@ -9,12 +9,12 @@ class GenerateNonce
 {
     public function handle(string $walletAddress): string
     {
-        WalletNonce::where('wallet_address', Str::lower($walletAddress))->delete();
+        WalletNonce::where('wallet_address', $walletAddress)->delete();
 
         $nonce = Str::random(40);
 
         WalletNonce::create([
-            'wallet_address' => Str::lower($walletAddress),
+            'wallet_address' => $walletAddress,
             'nonce' => $nonce,
             'expires_at' => now()->addMinutes(5),
         ]);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BridgeRequest;
 use App\Services\CataasApiService;
 use App\Services\CyberPriceService;
 use App\Services\YesNoApiService;
@@ -13,26 +14,48 @@ class ApiController extends Controller
 {
     public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)
     {
-        $cats = $cataas->cats();
-        $yesOrNo = $yesNo->get();
-        $tags = $cataas->tags();
         $price = $cyber->get();
 
+        $bridgeHistory = [];
+        if (auth()->check()) {
+            $bridgeHistory = BridgeRequest::where('user_id', auth()->id())
+                ->orderByDesc('created_at')
+                ->limit(20)
+                ->get([
+                    'id', 'direction', 'source_chain', 'source_tx_hash',
+                    'sender_address', 'recipient_address', 'amount',
+                    'status', 'destination_tx_hash', 'created_at', 'completed_at',
+                ]);
+        }
+
         return Inertia::render('Welcome', [
-            'canRegister' => Features::enabled(Features::registration()),
-            'yesOrNo' => $yesOrNo,
             'price' => $price,
-            'cataas' => [
-                'cat' => $cataas->cat(),
-                'catSays' => $cataas->catSays($yesOrNo->answer),
-                'catById' => $cataas->catById(Arr::random($cats)->id),
-                'catByIdSays' => $cataas->catByIdSays(Arr::random($cats)->id, $yesOrNo->answer),
-                'catByTag' => $cataas->catByTag(Arr::random($tags)),
-                'catByTagSays' => $cataas->catByTagSays(Arr::random($tags), $yesOrNo->answer),
-                'cats' => $cats,
-                'count' => $cataas->count(),
-                'tags' => $tags,
-            ],
+            'bridgeHistory' => $bridgeHistory,
         ]);
     }
+
+    // public function index(YesNoApiService $yesNo, CataasApiService $cataas, CyberPriceService $cyber)
+    // {
+    //     $cats = $cataas->cats();
+    //     $yesOrNo = $yesNo->get();
+    //     $tags = $cataas->tags();
+    //     $price = $cyber->get();
+
+    //     return Inertia::render('Welcome', [
+    //         'canRegister' => Features::enabled(Features::registration()),
+    //         'yesOrNo' => $yesOrNo,
+    //         'price' => $price,
+    //         'cataas' => [
+    //             'cat' => $cataas->cat(),
+    //             'catSays' => $cataas->catSays($yesOrNo->answer),
+    //             'catById' => $cataas->catById(Arr::random($cats)->id),
+    //             'catByIdSays' => $cataas->catByIdSays(Arr::random($cats)->id, $yesOrNo->answer),
+    //             'catByTag' => $cataas->catByTag(Arr::random($tags)),
+    //             'catByTagSays' => $cataas->catByTagSays(Arr::random($tags), $yesOrNo->answer),
+    //             'cats' => $cats,
+    //             'count' => $cataas->count(),
+    //             'tags' => $tags,
+    //         ],
+    //     ]);
+    // }
 }

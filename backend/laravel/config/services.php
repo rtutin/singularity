@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'ethereum' => [
+        'rpc_url' => env('CYBERIA_RPC_URL'),
+    ],
+
+    'bridge' => [
+        'evm_rpc_url' => env('BRIDGE_EVM_RPC_URL', env('CYBERIA_RPC_URL')),
+        'evm_bridge_address' => env('BRIDGE_EVM_CONTRACT_ADDRESS'),
+        'relayer_private_key' => env('BRIDGE_RELAYER_PRIVATE_KEY'),
+        'relayer_address' => env('BRIDGE_RELAYER_ADDRESS'),
+        'solana_rpc_url' => env('BRIDGE_SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com'),
+        'solana_bridge_program' => env('BRIDGE_SOLANA_PROGRAM_ID'),
+    ],
+
 ];

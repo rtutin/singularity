@@ -7,6 +7,7 @@ use App\Actions\Wallet\VerifyWalletSignature;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class WalletAuthController extends Controller
 {
@@ -21,7 +22,7 @@ class WalletAuthController extends Controller
             'wallet_address' => ['required', 'string', 'regex:/^0x[a-fA-F0-9]{40}$/'],
         ]);
 
-        $nonce = $this->generateNonce->handle($request->string('wallet_address')->value());
+        $nonce = $this->generateNonce->handle(Str::lower($request->string('wallet_address')->value()));
 
         return response()->json([
             'nonce' => $nonce,

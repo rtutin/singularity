@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid, Link as LinkIcon, Folder, Wallet } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { BookOpen, FolderGit2, LayoutGrid, Link as LinkIcon, Folder, Vote, Wallet } from 'lucide-vue-next';
+import { computed, onMounted } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -18,12 +18,21 @@ import {
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { useWallet } from '@/composables/useWallet';
+import { useSolanaWallet } from '@/composables/useSolanaWallet';
 import { useWalletAuth } from '@/composables/useWalletAuth';
 import type { NavItem } from '@/types';
 
 const page = usePage();
 const wallet = useWallet();
+const solanaWallet = useSolanaWallet();
 const walletAuth = useWalletAuth();
+
+// Restore wallet state from saved user addresses on mount
+onMounted(() => {
+    const user = page.props.auth?.user as { wallet_address?: string | null; solana_wallet_address?: string | null } | undefined;
+    wallet.restore(user?.wallet_address);
+    solanaWallet.restore(user?.solana_wallet_address);
+});
 
 const dashboardUrl = computed(() =>
     page.props.currentTeam ? dashboard(page.props.currentTeam.slug).url : '/',
@@ -44,6 +53,11 @@ const mainNavItems = computed<NavItem[]>(() => [
         title: 'Categories',
         href: '/categories',
         icon: Folder,
+    },
+    {
+        title: 'DAO',
+        href: '/dao',
+        icon: Vote,
     },
 ]);
 
@@ -70,6 +84,24 @@ const handleWalletConnect = async () => {
 
             if (signature) {
                 const response = await walletAuth.verifySignature(address, signature);
+                router.post('/login/web3', { token: response.token });
+            }
+        } catch {
+            // Error handled by composable
+        }
+    }
+};
+
+const handleSolanaConnect = async () => {
+    const address = await solanaWallet.connect();
+    if (address) {
+        try {
+            const { nonce } = await walletAuth.generateSolanaNonce(address);
+            const message = `Sign this message to authenticate with your wallet. Nonce: ${nonce}`;
+            const signature = await solanaWallet.signMessage(message);
+
+            if (signature) {
+                const response = await walletAuth.verifySolanaSignature(address, signature);
                 router.post('/login/web3', { token: response.token });
             }
         } catch {
@@ -113,15 +145,32 @@ const formatCyberBalance = (balance: string): string => {
                         <div class="flex w-full items-center gap-2">
                             <Wallet v-if="!wallet.isConnecting.value" class="h-4 w-4" />
                             <span v-if="wallet.isConnected.value" class="font-mono text-xs">
-                                {{ wallet.formatAddress(wallet.address.value!) }}
+                                EVM: {{ wallet.formatAddress(wallet.address.value!) }}
                             </span>
                             <span v-else>
-                                {{ wallet.isConnecting.value ? 'Connecting...' : 'Connect Wallet' }}
+                                {{ wallet.isConnecting.value ? 'Connecting...' : 'Connect EVM' }}
                             </span>
                         </div>
                         <span v-if="wallet.isConnected.value && wallet.cyberBalance.value" class="text-xs text-muted-foreground">
                             {{ formatCyberBalance(wallet.cyberBalance.value.formatted) }} CYBER
                         </span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                    <SidebarMenuButton
+                        class="flex-col items-start gap-1"
+                        :disabled="solanaWallet.isConnecting.value"
+                        @click="handleSolanaConnect"
+                    >
+                        <div class="flex w-full items-center gap-2">
+                            <Wallet v-if="!solanaWallet.isConnecting.value" class="h-4 w-4" />
+                            <span v-if="solanaWallet.isConnected.value" class="font-mono text-xs">
+                                SOL: {{ solanaWallet.formatAddress(solanaWallet.address.value!) }}
+                            </span>
+                            <span v-else>
+                                {{ solanaWallet.isConnecting.value ? 'Connecting...' : 'Connect Solana' }}
+                            </span>
+                        </div>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             </SidebarMenu>
