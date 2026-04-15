@@ -93,7 +93,7 @@ class BridgeService
     }
 
     /**
-     * Process EVM->Solana (not yet implemented).
+     * Process EVM->Solana: call relay script to unlock CYBER.sol SPL on Solana.
      */
     public function processEvmToSol(BridgeRequest $request): bool
     {
@@ -102,8 +102,59 @@ class BridgeService
         }
 
         $request->markProcessing();
-        $request->markFailed('EVM->Solana relay not yet implemented');
 
-        return false;
+        try {
+            // Convert amount to Solana lamports (9 decimals)
+            $amountLamports = bcmul($request->amount, bcpow('10', '9'));
+            $amountLamports = explode('.', $amountLamports)[0];
+
+            $anchorDir = base_path('/../../crypto/anchor');
+            $home = env('HOME', $_SERVER['HOME'] ?? '/home/lain');
+            $walletPath = $home.'/.config/solana/id.json';
+
+            $result = Process::path($anchorDir)
+                ->env([
+                    'ANCHOR_PROVIDER_URL' => 'https://api.devnet.solana.com',
+                    'ANCHOR_WALLET' => $walletPath,
+                ])
+                ->timeout(120)
+                ->run([
+                    'npx', 'tsx', 'scripts/relay-release-native.ts',
+                    $request->recipient_address,
+                    $amountLamports,
+                    (string) $request->source_nonce,
+                ]);
+
+            Log::info('Bridge relay evm_to_sol', [
+                'id' => $request->id,
+                'stdout' => $result->output(),
+                'stderr' => $result->errorOutput(),
+                'exit' => $result->exitCode(),
+            ]);
+
+            if ($result->exitCode() !== 0) {
+                $request->markFailed('Solana relay failed: '.$result->errorOutput());
+
+                return false;
+            }
+
+            $lines = array_filter(explode("\n", trim($result->output())));
+            $json = json_decode(end($lines), true);
+
+            if ($json && isset($json['txHash'])) {
+                $request->markCompleted($json['txHash']);
+
+                return true;
+            }
+
+            $request->markFailed('Could not parse Solana relay output');
+
+            return false;
+        } catch (\Exception $e) {
+            $request->markFailed($e->getMessage());
+            Log::error('Bridge: EvmToSol failed', ['id' => $request->id, 'error' => $e->getMessage()]);
+
+            return false;
+        }
     }
 }

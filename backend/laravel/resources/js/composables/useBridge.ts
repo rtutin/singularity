@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, formatUnits, parseUnits } from 'ethers';
+import { BrowserProvider, Contract, formatUnits, parseUnits, JsonRpcProvider } from 'ethers';
 import {
     Connection,
     PublicKey,
@@ -7,6 +7,8 @@ import {
 } from '@solana/web3.js';
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { ref } from 'vue';
+
+const CYBERIA_RPC = 'http://195.166.164.94:8545';
 
 const CYBERIA_CHAIN_ID = 49406;
 
@@ -49,28 +51,35 @@ export const useBridge = () => {
     //  Cyberia EVM
     // ---------------------------------------------------------------
 
-    const ensureCyberiaNetwork = async (): Promise<boolean> => {
+    /** Check if on Cyberia without prompting the user. */
+    const checkCyberiaNetwork = async (): Promise<boolean> => {
         if (!window.ethereum) return false;
         try {
             const chainIdHex = (await window.ethereum.request({ method: 'eth_chainId' })) as string;
-            if (parseInt(chainIdHex, 16) === CYBERIA_CHAIN_ID) { wrongNetwork.value = false; return true; }
-            try {
-                await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x' + CYBERIA_CHAIN_ID.toString(16) }] });
-                wrongNetwork.value = false; return true;
-            } catch {
-                try {
-                    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x' + CYBERIA_CHAIN_ID.toString(16), chainName: 'Cyberia', nativeCurrency: { name: 'Cyber', symbol: 'CYBER', decimals: 18 }, rpcUrls: ['http://195.166.164.94:8545'] }] });
-                    wrongNetwork.value = false; return true;
-                } catch { wrongNetwork.value = true; return false; }
-            }
+            const onCyberia = parseInt(chainIdHex, 16) === CYBERIA_CHAIN_ID;
+            wrongNetwork.value = !onCyberia;
+            return onCyberia;
         } catch { wrongNetwork.value = true; return false; }
     };
 
-    const fetchCyberBalance = async (address: string): Promise<void> => {
-        if (!window.ethereum) return;
-        if (!(await ensureCyberiaNetwork())) { cyberBalance.value = null; return; }
+    /** Force switch to Cyberia — only call before transactions. */
+    const ensureCyberiaNetwork = async (): Promise<boolean> => {
+        if (await checkCyberiaNetwork()) return true;
+        if (!window.ethereum) return false;
         try {
-            const provider = new BrowserProvider(window.ethereum);
+            await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x' + CYBERIA_CHAIN_ID.toString(16) }] });
+            wrongNetwork.value = false; return true;
+        } catch {
+            try {
+                await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x' + CYBERIA_CHAIN_ID.toString(16), chainName: 'Cyberia', nativeCurrency: { name: 'Cyber', symbol: 'CYBER', decimals: 18 }, rpcUrls: ['http://195.166.164.94:8545'] }] });
+                wrongNetwork.value = false; return true;
+            } catch { wrongNetwork.value = true; return false; }
+        }
+    };
+
+    const fetchCyberBalance = async (address: string): Promise<void> => {
+        try {
+            const provider = new JsonRpcProvider(CYBERIA_RPC);
             const contract = new Contract(CYBER_TOKEN_ADDRESS, ERC20_ABI, provider);
             const bal = (await contract.balanceOf(address)) as bigint;
             const dec = (await contract.decimals()) as number;
@@ -80,10 +89,10 @@ export const useBridge = () => {
     };
 
     const fetchCyberSolBalance = async (address: string): Promise<void> => {
-        if (!window.ethereum || wrongNetwork.value) { cyberSolBalance.value = null; return; }
         try {
-            const provider = new BrowserProvider(window.ethereum);
+            const provider = new JsonRpcProvider(CYBERIA_RPC);
             const contract = new Contract(CYBERSOL_ERC20_ADDRESS, ERC20_ABI, provider);
+            console.log(contract);
             const bal = (await contract.balanceOf(address)) as bigint;
             const dec = (await contract.decimals()) as number;
             cyberSolDecimals.value = dec;

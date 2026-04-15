@@ -16,6 +16,7 @@ import { useWalletAuth } from '@/composables/useWalletAuth';
 import { useSolanaWallet } from '@/composables/useSolanaWallet';
 import { useBridge } from '@/composables/useBridge';
 import { dashboard } from '@/routes';
+import { set } from '@vueuse/core';
 
 type BridgeHistoryItem = {
     id: number;
@@ -90,7 +91,7 @@ const destLabel = computed(() =>
     bridgeDirection.value === 'sol_to_evm' ? 'Cyberia EVM' : 'Solana',
 );
 const sourceTokenLabel = computed(() =>
-    bridgeDirection.value === 'sol_to_evm' ? 'CYBER.sol' : 'CYBER',
+    bridgeDirection.value === 'sol_to_evm' ? 'CYBER.sol' : 'CYBER.sol',
 );
 const destTokenLabel = computed(() =>
     bridgeDirection.value === 'sol_to_evm' ? 'CYBER.sol' : 'CYBER.sol',
@@ -98,10 +99,28 @@ const destTokenLabel = computed(() =>
 
 const sourceBalance = computed(() => {
     if (bridgeDirection.value === 'evm_to_sol') {
-        return bridge.cyberBalance.value;
+        console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
+        setTimeout(() => {
+console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
+        }, 2000);
+    
+        // Sending CYBER.sol from EVM back to Solana
+        return bridge.cyberSolBalance.value;
     }
+    // Sending CYBER.sol from Solana to EVM
     return bridge.solanaCyberBalance.value;
 });
+
+// Show all balances the user has
+const evmCyberDisplay = computed(() =>
+    bridge.cyberBalance.value ? parseFloat(bridge.cyberBalance.value).toFixed(4) : null,
+);
+const evmCyberSolDisplay = computed(() =>
+    bridge.cyberSolBalance.value ? parseFloat(bridge.cyberSolBalance.value).toFixed(4) : null,
+);
+const solCyberSolDisplay = computed(() =>
+    bridge.solanaCyberBalance.value ? parseFloat(bridge.solanaCyberBalance.value).toFixed(4) : null,
+);
 
 const amountExceedsBalance = computed(() => {
     const amt = parseFloat(bridgeAmount.value);
@@ -174,11 +193,11 @@ const handleBridgeSubmit = async () => {
         let recipientAddress: string;
 
         if (bridgeDirection.value === 'evm_to_sol') {
-            // EVM -> Solana: lock CYBER on EVM bridge contract
+            // EVM -> Solana: burn CYBER.sol on EVM to redeem on Solana
             senderAddress = evmWallet.address.value!;
             recipientAddress = solanaWallet.address.value!;
 
-            const result = await bridge.lockCyberOnEvm(
+            const result = await bridge.redeemCyberSolOnEvm(
                 bridgeAmount.value,
                 recipientAddress,
             );
@@ -222,12 +241,21 @@ const handleBridgeSubmit = async () => {
             }),
         });
 
+        const data = await response.json();
+
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.message || 'Failed to register bridge request');
+            throw new Error(data.message || 'Failed to register bridge request');
         }
 
-        feedbackSuccess.value = `Bridged ${amount} ${sourceTokenLabel.value}. Tx: ${txHash.slice(0, 10)}...`;
+        const br = data.bridge_request;
+        if (br?.status === 'completed') {
+            feedbackSuccess.value = `Bridge complete! ${amount} ${sourceTokenLabel.value} sent. Dest tx: ${br.destination_tx_hash?.slice(0, 12)}...`;
+        } else if (br?.status === 'failed') {
+            feedbackError.value = `Bridge failed: ${br.error_message || 'Unknown error'}`;
+        } else {
+            feedbackSuccess.value = `Bridge submitted. Tx: ${txHash.slice(0, 10)}...`;
+        }
+
         bridgeAmount.value = '';
         refreshBalances();
         router.reload();
@@ -466,6 +494,13 @@ const statusColor = (status: string) => {
                                 )
                             }}
                         </p>
+                        <div
+                            v-if="evmWallet.isConnected.value && (evmCyberDisplay || evmCyberSolDisplay)"
+                            class="mt-0.5 flex gap-2 text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                        >
+                            <span v-if="evmCyberDisplay" class="font-mono">{{ evmCyberDisplay }} CYBER</span>
+                            <span v-if="evmCyberSolDisplay" class="font-mono">{{ evmCyberSolDisplay }} CYBER.sol</span>
+                        </div>
                     </div>
                     <button
                         v-if="
@@ -517,6 +552,12 @@ const statusColor = (status: string) => {
                                     solanaWallet.address.value,
                                 )
                             }}
+                        </p>
+                        <p
+                            v-if="solanaWallet.isConnected.value && solCyberSolDisplay"
+                            class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                        >
+                            {{ solCyberSolDisplay }} CYBER.sol
                         </p>
                     </div>
                     <button

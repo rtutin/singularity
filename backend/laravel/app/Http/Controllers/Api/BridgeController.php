@@ -44,13 +44,17 @@ class BridgeController extends Controller
 
         ProcessBridgeRequest::dispatchSync($bridgeRequest->id);
 
+        $bridgeRequest->refresh();
+
         return response()->json([
-            'message' => 'Bridge request submitted',
+            'message' => $bridgeRequest->isCompleted() ? 'Bridge completed' : 'Bridge request submitted',
             'bridge_request' => [
                 'id' => $bridgeRequest->id,
                 'direction' => $bridgeRequest->direction,
                 'status' => $bridgeRequest->status,
                 'amount' => $bridgeRequest->amount,
+                'destination_tx_hash' => $bridgeRequest->destination_tx_hash,
+                'error_message' => $bridgeRequest->error_message,
                 'created_at' => $bridgeRequest->created_at,
             ],
         ], 201);
