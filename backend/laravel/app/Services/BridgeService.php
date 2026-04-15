@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BridgeRequest;
+use App\Support\Environment;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
@@ -107,11 +108,9 @@ class BridgeService
             // Convert amount to Solana lamports (9 decimals)
             $amountLamports = bcmul($request->amount, bcpow('10', '9'));
             $amountLamports = explode('.', $amountLamports)[0];
-            $anchorDir = base_path('/../../crypto/anchor');
-
-            if (env('APP_ENV') === 'production') {
-                $anchorDir = base_path('/singularity/crypto/anchor');
-            }
+            $anchorDir = Environment::isProduction()
+                ? base_path('/singularity/crypto/anchor')
+                : base_path('/../../crypto/anchor');
             
             $home = env('HOME', $_SERVER['HOME'] ?? '/home/lain');
             $walletPath = $home.'/.config/solana/id.json';

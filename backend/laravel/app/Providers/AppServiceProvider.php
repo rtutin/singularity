@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Environment;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -24,31 +25,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if ($this->isProduction()) {
+        if (Environment::isProduction()) {
             URL::forceHttps();
         }
-        
+
         $this->configureDefaults();
-    }
-
-    /**
-     * Determine if the application is running in production based on hostname.
-     */
-    protected function isProduction(): bool
-    {
-        $productionDomains = [
-            'cyberia.church',
-        ];
-
-        $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? null;
-
-        if ($host !== null) {
-            $host = strtok($host, ':'); // strip port if present
-
-            return in_array($host, $productionDomains, true);
-        }
-
-        return app()->isProduction();
     }
 
     /**
