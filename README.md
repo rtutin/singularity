@@ -6,10 +6,10 @@
 - CYBER.sol CA: E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump
 
 # Network config
-network name: cyberia
-URL RPC: http://195.166.164.94:8545
-Chain ID: 49406
-Token: CYBER
+- network name: cyberia
+- URL RPC: https://rpc.cyberia.church
+- Chain ID: 49406
+- Token: CYBER
 
 # Singularity
 
