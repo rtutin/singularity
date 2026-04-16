@@ -22,6 +22,30 @@ class BridgeService
 
     private const SOLANA_RPC = 'https://api.devnet.solana.com';
 
+    /**
+     * Bridge fee percentage (1% = 0.01).
+     */
+    private const FEE_RATE = '0.01';
+
+    /**
+     * Calculate the amount after deducting the bridge fee.
+     */
+    public static function deductFee(string $amount): string
+    {
+        $fee = bcmul($amount, self::FEE_RATE, 18);
+        $afterFee = bcsub($amount, $fee, 18);
+
+        return $afterFee;
+    }
+
+    /**
+     * Calculate the fee for a given amount.
+     */
+    public static function calculateFee(string $amount): string
+    {
+        return bcmul($amount, self::FEE_RATE, 18);
+    }
+
     public function createRequest(
         ?int $userId,
         string $direction,
@@ -169,8 +193,17 @@ class BridgeService
                 'claimed_amount' => $request->amount,
             ]);
 
-            $amountWei = bcmul($request->amount, bcpow('10', '18'));
+            // Deduct 1% bridge fee
+            $amountAfterFee = self::deductFee($request->amount);
+            $amountWei = bcmul($amountAfterFee, bcpow('10', '18'));
             $amountWei = explode('.', $amountWei)[0];
+
+            Log::info('Bridge: sol_to_evm fee applied', [
+                'id' => $request->id,
+                'original' => $request->amount,
+                'fee' => self::calculateFee($request->amount),
+                'after_fee' => $amountAfterFee,
+            ]);
 
             $hardhatDir = Environment::isProduction()
                 ? '/singularity/crypto/hardhat'
@@ -236,8 +269,18 @@ class BridgeService
         $request->markProcessing();
 
         try {
+            // Deduct 1% bridge fee
+            $amountAfterFee = self::deductFee($request->amount);
+
+            Log::info('Bridge: evm_to_sol fee applied', [
+                'id' => $request->id,
+                'original' => $request->amount,
+                'fee' => self::calculateFee($request->amount),
+                'after_fee' => $amountAfterFee,
+            ]);
+
             // Convert amount to Solana smallest units (9 decimals on devnet)
-            $amountRaw = bcmul($request->amount, bcpow('10', '9'));
+            $amountRaw = bcmul($amountAfterFee, bcpow('10', '9'));
             $amountRaw = explode('.', $amountRaw)[0];
 
             $scriptDir = Environment::isProduction()
