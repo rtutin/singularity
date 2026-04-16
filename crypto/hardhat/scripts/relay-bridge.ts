@@ -27,13 +27,13 @@ const chain = {
 
 const walletClient = createWalletClient({
   chain,
-  transport: http("https://rpc.cyberia.church"),
+  transport: http("http://localhost:8545"),
   account,
 });
 
 const publicClient = createPublicClient({
   chain,
-  transport: http("https://rpc.cyberia.church"),
+  transport: http("http://localhost:8545"),
 });
 
 const bridgeAbi = parseAbi([
