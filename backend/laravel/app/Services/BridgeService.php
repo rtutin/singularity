@@ -52,7 +52,7 @@ class BridgeService
     public function verifySolanaDeposit(string $txHash, string $expectedSender): ?string
     {
         try {
-            $response = Http::post(self::SOLANA_RPC, [
+            $response = Http::timeout(30)->post(self::SOLANA_RPC, [
                 'jsonrpc' => '2.0',
                 'id' => 1,
                 'method' => 'getTransaction',
@@ -62,9 +62,22 @@ class BridgeService
                 ],
             ]);
 
+            if (! $response->successful()) {
+                Log::error('Bridge: Solana RPC HTTP error', ['tx' => $txHash, 'status' => $response->status(), 'body' => $response->body()]);
+
+                return null;
+            }
+
             $result = $response->json('result');
 
             if (! $result || ($result['meta']['err'] ?? null) !== null) {
+                Log::warning('Bridge: Solana tx not found or failed', [
+                    'tx' => $txHash,
+                    'result_null' => $result === null,
+                    'rpc_error' => $response->json('error'),
+                    'meta_err' => $result['meta']['err'] ?? null,
+                ]);
+
                 return null;
             }
 
@@ -78,28 +91,45 @@ class BridgeService
                 }
             }
 
+            Log::info('Bridge: verifySolanaDeposit scanning instructions', [
+                'tx' => $txHash,
+                'expectedSender' => $expectedSender,
+                'instruction_count' => count($instructions),
+            ]);
+
             foreach ($instructions as $ix) {
                 $parsed = $ix['parsed'] ?? null;
-                if (! $parsed || ($parsed['type'] ?? '') !== 'transfer') {
-                    continue;
-                }
-
-                $info = $parsed['info'] ?? [];
                 $program = $ix['program'] ?? '';
+                $type = $parsed['type'] ?? '';
 
                 if ($program !== 'spl-token') {
                     continue;
                 }
 
-                // Check: authority is the expected sender, destination is hot wallet ATA
-                // We verify the amount came from the right sender
+                $info = $parsed['info'] ?? [];
+
+                Log::info('Bridge: verifySolanaDeposit found spl-token ix', [
+                    'type' => $type,
+                    'authority' => $info['authority'] ?? 'n/a',
+                    'amount' => $info['amount'] ?? ($info['tokenAmount']['amount'] ?? 'n/a'),
+                ]);
+
+                // Support both 'transfer' and 'transferChecked'
+                if ($type !== 'transfer' && $type !== 'transferChecked') {
+                    continue;
+                }
+
                 if (($info['authority'] ?? '') !== $expectedSender) {
                     continue;
                 }
 
-                // The amount is in raw units (6 decimals)
-                return $info['amount'] ?? null;
+                // 'transfer' has 'amount', 'transferChecked' has 'tokenAmount.amount'
+                $amount = $info['amount'] ?? ($info['tokenAmount']['amount'] ?? null);
+
+                return $amount;
             }
+
+            Log::warning('Bridge: verifySolanaDeposit no matching transfer found', ['tx' => $txHash]);
 
             return null;
         } catch (\Exception $e) {
