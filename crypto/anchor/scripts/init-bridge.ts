@@ -4,6 +4,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import fs from "fs";
 
+// Devnet CYBER token (9 decimals)
 const NATIVE_MINT = new PublicKey("6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o");
 const WRAPPED_MINT = new PublicKey("3LVU9LaedQKiFxfb92RKHxhhmoGvp6FNvth6tmKDJF4M");
 const PROGRAM_ID = new PublicKey("FRDGTfySMijDP7sjw3tQq9u2FtEHteUCZu5jR9MGErEJ");

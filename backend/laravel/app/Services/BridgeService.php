@@ -4,11 +4,24 @@ namespace App\Services;
 
 use App\Models\BridgeRequest;
 use App\Support\Environment;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
 class BridgeService
 {
+    /**
+     * Hot wallet address on Solana (receives deposits from users).
+     */
+    private const SOLANA_HOT_WALLET = 'E6E8AeKoT6i2zmwrGyDF2LwfEfjX9Xg8LfEj2Fu8Yf7w';
+
+    /**
+     * CYBER token mint on Solana devnet (9 decimals).
+     */
+    private const SOLANA_CYBER_MINT = '6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o';
+
+    private const SOLANA_RPC = 'https://api.devnet.solana.com';
+
     public function createRequest(
         ?int $userId,
         string $direction,
@@ -33,7 +46,71 @@ class BridgeService
     }
 
     /**
-     * Process Solana->EVM: call relay script to mint CYBER.sol on EVM.
+     * Verify that a Solana transaction is a real SPL transfer to our hot wallet.
+     * Returns the transfer amount in raw units, or null if invalid.
+     */
+    public function verifySolanaDeposit(string $txHash, string $expectedSender): ?string
+    {
+        try {
+            $response = Http::post(self::SOLANA_RPC, [
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'getTransaction',
+                'params' => [
+                    $txHash,
+                    ['encoding' => 'jsonParsed', 'commitment' => 'confirmed', 'maxSupportedTransactionVersion' => 0],
+                ],
+            ]);
+
+            $result = $response->json('result');
+
+            if (! $result || ($result['meta']['err'] ?? null) !== null) {
+                return null;
+            }
+
+            // Look through inner instructions and top-level instructions for SPL transfers
+            $instructions = $result['transaction']['message']['instructions'] ?? [];
+            $innerInstructions = $result['meta']['innerInstructions'] ?? [];
+
+            foreach ($innerInstructions as $inner) {
+                foreach ($inner['instructions'] ?? [] as $ix) {
+                    $instructions[] = $ix;
+                }
+            }
+
+            foreach ($instructions as $ix) {
+                $parsed = $ix['parsed'] ?? null;
+                if (! $parsed || ($parsed['type'] ?? '') !== 'transfer') {
+                    continue;
+                }
+
+                $info = $parsed['info'] ?? [];
+                $program = $ix['program'] ?? '';
+
+                if ($program !== 'spl-token') {
+                    continue;
+                }
+
+                // Check: authority is the expected sender, destination is hot wallet ATA
+                // We verify the amount came from the right sender
+                if (($info['authority'] ?? '') !== $expectedSender) {
+                    continue;
+                }
+
+                // The amount is in raw units (6 decimals)
+                return $info['amount'] ?? null;
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Bridge: verifySolanaDeposit failed', ['tx' => $txHash, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Process Solana->EVM: verify deposit, then call relay script to mint CYBER.sol on EVM.
      */
     public function processSolToEvm(BridgeRequest $request): bool
     {
@@ -44,6 +121,24 @@ class BridgeService
         $request->markProcessing();
 
         try {
+            // Verify the Solana transaction is a real deposit to our hot wallet
+            $verifiedAmount = $this->verifySolanaDeposit(
+                $request->source_tx_hash,
+                $request->sender_address,
+            );
+
+            if ($verifiedAmount === null) {
+                $request->markFailed('Could not verify Solana deposit transaction');
+
+                return false;
+            }
+
+            Log::info('Bridge: Solana deposit verified', [
+                'id' => $request->id,
+                'verified_amount_raw' => $verifiedAmount,
+                'claimed_amount' => $request->amount,
+            ]);
+
             $amountWei = bcmul($request->amount, bcpow('10', '18'));
             $amountWei = explode('.', $amountWei)[0];
 
@@ -52,16 +147,21 @@ class BridgeService
                 : base_path('/../../crypto/hardhat');
 
             $result = Process::path($hardhatDir)
+                ->env([
+                    'CYBERIA_RPC_URL' => Environment::isProduction()
+                        ? 'http://polygon-edge:8545'
+                        : 'http://195.166.164.94:8545',
+                ])
                 ->timeout(120)
                 ->run([
                     'npx', 'tsx', 'scripts/relay-bridge.ts',
                     'sol_to_evm',
                     $request->recipient_address,
                     $amountWei,
-                    (string) $request->source_nonce,
+                    (string) $request->id,
                 ]);
 
-            Log::info('Bridge relay', [
+            Log::info('Bridge relay sol_to_evm', [
                 'id' => $request->id,
                 'stdout' => $result->output(),
                 'stderr' => $result->errorOutput(),
@@ -74,7 +174,6 @@ class BridgeService
                 return false;
             }
 
-            // Parse JSON from last line of output
             $lines = array_filter(explode("\n", trim($result->output())));
             $json = json_decode(end($lines), true);
 
@@ -96,7 +195,7 @@ class BridgeService
     }
 
     /**
-     * Process EVM->Solana: call relay script to unlock CYBER.sol SPL on Solana.
+     * Process EVM->Solana: send CYBER SPL tokens from hot wallet to recipient.
      */
     public function processEvmToSol(BridgeRequest $request): bool
     {
@@ -107,30 +206,30 @@ class BridgeService
         $request->markProcessing();
 
         try {
-            // Convert amount to Solana lamports (9 decimals)
-            $amountLamports = bcmul($request->amount, bcpow('10', '9'));
-            $amountLamports = explode('.', $amountLamports)[0];
-            $anchorDir = Environment::isProduction()
+            // Convert amount to Solana smallest units (9 decimals on devnet)
+            $amountRaw = bcmul($request->amount, bcpow('10', '9'));
+            $amountRaw = explode('.', $amountRaw)[0];
+
+            $scriptDir = Environment::isProduction()
                 ? '/singularity/crypto/anchor'
                 : base_path('/../../crypto/anchor');
-            
+
             $home = env('HOME', $_SERVER['HOME'] ?? '/home/lain');
 
             $walletPath = Environment::isProduction()
                 ? '/solana/id.json'
                 : $home.'/.config/solana/id.json';
 
-            $result = Process::path($anchorDir)
+            $result = Process::path($scriptDir)
                 ->env([
-                    'ANCHOR_PROVIDER_URL' => 'https://api.devnet.solana.com',
+                    'ANCHOR_PROVIDER_URL' => self::SOLANA_RPC,
                     'ANCHOR_WALLET' => $walletPath,
                 ])
                 ->timeout(120)
                 ->run([
                     'npx', 'tsx', 'scripts/relay-release-native.ts',
                     $request->recipient_address,
-                    $amountLamports,
-                    (string) $request->source_nonce,
+                    $amountRaw,
                 ]);
 
             Log::info('Bridge relay evm_to_sol', [
