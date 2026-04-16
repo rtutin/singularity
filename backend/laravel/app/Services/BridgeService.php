@@ -18,9 +18,9 @@ class BridgeService
     /**
      * CYBER token mint on Solana devnet (9 decimals).
      */
-    private const SOLANA_CYBER_MINT = '6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o';
+    private const SOLANA_CYBER_MINT = 'E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump';
 
-    private const SOLANA_RPC = 'https://api.devnet.solana.com';
+    private const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=7e740762-a25d-4d37-b854-de4cec9815ed';
 
     /**
      * Bridge fee percentage (1% = 0.01).

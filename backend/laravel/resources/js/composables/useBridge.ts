@@ -20,10 +20,12 @@ function getCyberiaProvider(): JsonRpcProvider {
     return new JsonRpcProvider(CYBERIA_RPC, cyberiaNetwork, { staticNetwork: cyberiaNetwork });
 }
 
-// Solana (devnet)
-const SOLANA_RPC = 'https://api.devnet.solana.com';
-const SOLANA_NATIVE_MINT = new PublicKey('6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o');
-const SOLANA_NATIVE_DECIMALS = 9;
+const TOKEN_EXTENSIONS_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=7e740762-a25d-4d37-b854-de4cec9815ed';
+const SOLANA_NATIVE_MINT = new PublicKey('E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump');
+// const SOLANA_NATIVE_MINT = new PublicKey('6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o');
+const SOLANA_NATIVE_DECIMALS = 6;
 
 // Hot wallet — relayer's Solana address (receives deposits, sends withdrawals)
 const BRIDGE_HOT_WALLET = new PublicKey('E6E8AeKoT6i2zmwrGyDF2LwfEfjX9Xg8LfEj2Fu8Yf7w');
@@ -76,12 +78,34 @@ export const useBridge = () => {
 
     const fetchSolanaCyberBalance = async (walletAddress: string): Promise<void> => {
         try {
-            const connection = new Connection(SOLANA_RPC, 'confirmed');
-            const owner = new PublicKey(walletAddress);
-            const ata = await getAssociatedTokenAddress(SOLANA_NATIVE_MINT, owner);
-            const account = await getAccount(connection, ata);
-            solanaCyberBalance.value = (Number(account.amount) / 10 ** SOLANA_NATIVE_DECIMALS).toString();
-        } catch {
+            const res = await fetch(SOLANA_RPC, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'getTokenAccountsByOwner',
+                    params: [
+                        walletAddress,
+                        { mint: SOLANA_NATIVE_MINT.toBase58() },
+                        { encoding: 'jsonParsed' },
+                    ],
+                }),
+            });
+            const json = await res.json();
+            console.log('[bridge] raw response:', JSON.stringify(json, null, 2));
+
+            const accounts = json.result?.value ?? [];
+            if (accounts.length === 0) {
+                solanaCyberBalance.value = '0';
+                return;
+            }
+
+            const amount = accounts[0].account.data.parsed.info.tokenAmount.uiAmount ?? '0';
+            console.log('[bridge] account fetched:', { amount });
+            solanaCyberBalance.value = amount.toString();
+        } catch (e) {
+            console.error('[bridge] fetchSolanaCyberBalance failed:', e);
             solanaCyberBalance.value = '0';
         }
     };
@@ -131,18 +155,26 @@ export const useBridge = () => {
 
         const connection = new Connection(SOLANA_RPC, 'confirmed');
         const userPubkey = new PublicKey(phantom.publicKey.toBase58());
+        const TOKEN_EXT_PROGRAM = new PublicKey(TOKEN_EXTENSIONS_PROGRAM_ID);
 
         const amountRaw = BigInt(Math.round(parseFloat(amount) * 10 ** SOLANA_NATIVE_DECIMALS));
 
-        // Derive ATAs
-        const userAta = await getAssociatedTokenAddress(SOLANA_NATIVE_MINT, userPubkey);
-        const hotWalletAta = await getAssociatedTokenAddress(SOLANA_NATIVE_MINT, BRIDGE_HOT_WALLET);
+        const userAta = await getAssociatedTokenAddress(
+            SOLANA_NATIVE_MINT, userPubkey,
+            false,               // allowOwnerOffCurve
+            TOKEN_EXT_PROGRAM,   // ← Token-2022
+        );
+        const hotWalletAta = await getAssociatedTokenAddress(
+            SOLANA_NATIVE_MINT, BRIDGE_HOT_WALLET,
+            false,
+            TOKEN_EXT_PROGRAM,
+        );
 
         const tx = new Transaction();
 
-        // Create hot wallet ATA if it doesn't exist (user pays, one-time)
+        // Создаём ATA hot wallet если не существует
         try {
-            await getAccount(connection, hotWalletAta);
+            await getAccount(connection, hotWalletAta, 'confirmed', TOKEN_EXT_PROGRAM);
         } catch {
             tx.add(
                 createAssociatedTokenAccountInstruction(
@@ -150,31 +182,34 @@ export const useBridge = () => {
                     hotWalletAta,
                     BRIDGE_HOT_WALLET,
                     SOLANA_NATIVE_MINT,
+                    TOKEN_EXT_PROGRAM,   // ← Token-2022
                 ),
             );
         }
 
-        // Standard SPL transfer: user -> hot wallet
+        // Transfer: userAta → hotWalletAta
         tx.add(
             createTransferInstruction(
                 userAta,
                 hotWalletAta,
                 userPubkey,
                 amountRaw,
+                [],              // multiSigners
+                TOKEN_EXT_PROGRAM, // ← ЭТОГО и не хватало!
             ),
         );
 
-        const { blockhash } = await connection.getLatestBlockhash('finalized');
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
         tx.recentBlockhash = blockhash;
         tx.feePayer = userPubkey;
 
-        console.log('[bridge] lockNativeOnSolana: signing SPL transfer to hot wallet');
         const { signature } = await phantom.signAndSendTransaction(tx);
-        console.log('[bridge] lockNativeOnSolana: tx sent, confirming', { signature });
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('[bridge] lockNativeOnSolana: tx confirmed');
 
-        // nonce=0 — backend uses tx hash for dedup, no on-chain nonce needed
+        await connection.confirmTransaction(
+            { signature, blockhash, lastValidBlockHeight },
+            'confirmed',
+        );
+
         return { txHash: signature, nonce: 0 };
     };
 
