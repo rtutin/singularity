@@ -280,7 +280,7 @@ class BridgeService
             ]);
 
             // Convert amount to Solana smallest units (9 decimals on devnet)
-            $amountRaw = bcmul($amountAfterFee, bcpow('10', '9'));
+            $amountRaw = bcmul($amountAfterFee, bcpow('10', '6'));
             $amountRaw = explode('.', $amountRaw)[0];
 
             $scriptDir = Environment::isProduction()

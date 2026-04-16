@@ -130,4 +130,24 @@ contract CyberBridge is Ownable {
         uint64 nonce = lockNonce++;
         emit RedeemCyberSol(msg.sender, amount, solanaRecipient, nonce);
     }
+
+    function rescueERC20(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
+        require(to != address(0), "Bridge: zero recipient");
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (amount == 0) amount = bal;
+        require(amount <= bal, "Bridge: insufficient balance");
+        IERC20(token).transfer(to, amount);
+    }
+
+    /// @notice Withdraw native ETH/CYBER accidentally sent to the contract.
+    function rescueNative(address payable to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Bridge: zero recipient");
+        if (amount == 0) amount = address(this).balance;
+        (bool ok, ) = to.call{value: amount}("");
+        require(ok, "Bridge: ETH transfer failed");
+    }
 }
