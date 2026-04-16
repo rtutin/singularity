@@ -1,0 +1,766 @@
+{
+  "address": "FRDGTfySMijDP7sjw3tQq9u2FtEHteUCZu5jR9MGErEJ",
+  "metadata": {
+    "name": "cyber_bridge",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "docs": [
+        "Initialize the bridge with native and wrapped token mints."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "native_mint",
+          "docs": [
+            "The native SPL token mint being bridged (e.g. CYBER.sol)."
+          ]
+        },
+        {
+          "name": "wrapped_mint",
+          "docs": [
+            "The wrapped SPL token mint (wCYBER). Must be created beforehand",
+            "with the bridge PDA as mint authority."
+          ]
+        },
+        {
+          "name": "bridge_config",
+          "docs": [
+            "Bridge config PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  114,
+                  105,
+                  100,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Vault token account to hold locked native tokens.",
+            "Owned by the bridge PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "native_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "lock_native",
+      "docs": [
+        "User locks native CYBER.sol to bridge to EVM."
+      ],
+      "discriminator": [
+        8,
+        105,
+        192,
+        232,
+        135,
+        27,
+        131,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bridge_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  114,
+                  105,
+                  100,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "docs": [
+            "User's token account for the native mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Bridge vault holding locked native tokens."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bridge_config.native_mint",
+                "account": "BridgeConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "evm_recipient",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "redeem_wrapped",
+      "docs": [
+        "User burns wrapped wCYBER to redeem native CYBER on EVM."
+      ],
+      "discriminator": [
+        161,
+        127,
+        163,
+        181,
+        154,
+        11,
+        41,
+        79
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bridge_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  114,
+                  105,
+                  100,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "wrapped_mint",
+          "docs": [
+            "The wrapped token mint. Bridge PDA is the mint authority."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_token_account",
+          "docs": [
+            "User's token account for the wrapped mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "evm_recipient",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "release_native",
+      "docs": [
+        "Relayer unlocks native CYBER.sol when user redeems wCYBER.sol on EVM."
+      ],
+      "discriminator": [
+        140,
+        16,
+        10,
+        50,
+        169,
+        242,
+        249,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bridge_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  114,
+                  105,
+                  100,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "processed_nonce",
+          "docs": [
+            "Track processed nonce to prevent replay."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  101,
+                  97,
+                  115,
+                  101,
+                  95,
+                  110,
+                  97,
+                  116,
+                  105,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recipient_token_account",
+          "docs": [
+            "Recipient's token account for the native mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Bridge vault holding locked native tokens."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bridge_config.native_mint",
+                "account": "BridgeConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "release_wrapped",
+      "docs": [
+        "Relayer mints wrapped wCYBER when user locks CYBER on EVM."
+      ],
+      "discriminator": [
+        7,
+        154,
+        128,
+        220,
+        23,
+        218,
+        36,
+        116
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bridge_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  114,
+                  105,
+                  100,
+                  103,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "processed_nonce",
+          "docs": [
+            "Track processed nonce to prevent replay."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  101,
+                  97,
+                  115,
+                  101,
+                  95,
+                  119,
+                  114,
+                  97,
+                  112,
+                  112,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wrapped_mint",
+          "docs": [
+            "The wrapped token mint. Bridge PDA is the mint authority."
+          ],
+          "writable": true
+        },
+        {
+          "name": "recipient_token_account",
+          "docs": [
+            "Recipient's token account for the wrapped mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BridgeConfig",
+      "discriminator": [
+        40,
+        206,
+        51,
+        233,
+        246,
+        40,
+        178,
+        85
+      ]
+    },
+    {
+      "name": "ProcessedNonce",
+      "discriminator": [
+        87,
+        103,
+        207,
+        74,
+        54,
+        201,
+        43,
+        133
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "LockNativeEvent",
+      "discriminator": [
+        192,
+        165,
+        59,
+        88,
+        77,
+        209,
+        216,
+        1
+      ]
+    },
+    {
+      "name": "RedeemWrappedEvent",
+      "discriminator": [
+        109,
+        113,
+        81,
+        3,
+        170,
+        219,
+        6,
+        18
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BridgePaused",
+      "msg": "Bridge is paused"
+    },
+    {
+      "code": 6001,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidEvmRecipient",
+      "msg": "Invalid EVM recipient address"
+    },
+    {
+      "code": 6003,
+      "name": "NonceAlreadyProcessed",
+      "msg": "Nonce already processed"
+    },
+    {
+      "code": 6004,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    }
+  ],
+  "types": [
+    {
+      "name": "BridgeConfig",
+      "docs": [
+        "Global bridge configuration. PDA seed: [\"bridge\"]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "The authority (relayer) that can release/unlock tokens."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "native_mint",
+            "docs": [
+              "The SPL mint of the native token being bridged (CYBER.sol)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "wrapped_mint",
+            "docs": [
+              "The SPL mint of the wrapped token from EVM (wCYBER).",
+              "This mint's authority is the bridge PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lock_nonce",
+            "docs": [
+              "Monotonically increasing nonce for lock events."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for the bridge PDA."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Whether the bridge is paused."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LockNativeEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "evm_recipient",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProcessedNonce",
+      "docs": [
+        "Tracks processed nonces to prevent replay. PDA seed: [\"processed\", nonce_type, nonce_bytes]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "processed",
+            "docs": [
+              "Whether this nonce has been processed."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RedeemWrappedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "evm_recipient",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "BRIDGE_SEED",
+      "type": "bytes",
+      "value": "[98, 114, 105, 100, 103, 101]"
+    },
+    {
+      "name": "PROCESSED_SEED",
+      "type": "bytes",
+      "value": "[112, 114, 111, 99, 101, 115, 115, 101, 100]"
+    },
+    {
+      "name": "VAULT_SEED",
+      "type": "bytes",
+      "value": "[118, 97, 117, 108, 116]"
+    }
+  ]
+}
