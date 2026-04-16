@@ -99,11 +99,6 @@ const destTokenLabel = computed(() =>
 
 const sourceBalance = computed(() => {
     if (bridgeDirection.value === 'evm_to_sol') {
-        console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
-        setTimeout(() => {
-console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
-        }, 2000);
-    
         // Sending CYBER.sol from EVM back to Solana
         return bridge.cyberSolBalance.value;
     }
@@ -198,7 +193,6 @@ const handleBridgeSubmit = async () => {
                 recipientAddress,
             );
             if (!result) throw new Error('Transaction cancelled');
-            console.log('[bridge] EVM tx result', result);
             txHash = result.txHash;
             nonce = result.nonce;
         } else {
@@ -211,16 +205,13 @@ const handleBridgeSubmit = async () => {
                 recipientAddress,
             );
             if (!result) throw new Error('Transaction cancelled');
-            console.log('[bridge] Solana tx result', result);
             txHash = result.txHash;
             nonce = result.nonce;
         }
 
         // Submit bridge request to backend relayer
-        console.log('[bridge] Submitting to backend', { direction: bridgeDirection.value, txHash, nonce, senderAddress, recipientAddress, amount: bridgeAmount.value });
         const csrfToken = document.cookie
             .match(/XSRF-TOKEN=([^;]+)/)?.[1];
-        console.log('[bridge] CSRF token found:', !!csrfToken);
         const response = await fetch('/bridge/submit', {
             method: 'POST',
             headers: {
@@ -241,9 +232,7 @@ const handleBridgeSubmit = async () => {
             }),
         });
 
-        console.log('[bridge] Backend response status:', response.status);
         const data = await response.json();
-        console.log('[bridge] Backend response data:', data);
 
         if (!response.ok) {
             throw new Error(data.message || 'Failed to register bridge request');
