@@ -108,11 +108,15 @@ class BridgeService
             // Convert amount to Solana lamports (9 decimals)
             $amountLamports = bcmul($request->amount, bcpow('10', '9'));
             $amountLamports = explode('.', $amountLamports)[0];
+
             $anchorDir = Environment::isProduction()
                 ? '/singularity/crypto/anchor'
                 : base_path('/../../crypto/anchor');
             
-            $home = env('HOME', $_SERVER['HOME'] ?? '/home/lain');
+            $home = Environment::isProduction()
+                ? '/home/root'
+                : '/home/lain';
+
             $walletPath = $home.'/.config/solana/id.json';
 
             $result = Process::path($anchorDir)
