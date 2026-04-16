@@ -105,10 +105,15 @@ export const useBridge = () => {
         const signer = await provider.getSigner();
         const amountWei = parseUnits(String(amount), cyberSolDecimals.value);
         const solRecipient = solanaBase58ToBytes32(solanaRecipientBase58);
+        console.log('[bridge] redeemCyberSolOnEvm: sending tx', { amount, amountWei: amountWei.toString(), solRecipient });
         const bridge = new Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
         const tx = await bridge.redeemCyberSol(amountWei, solRecipient);
+        console.log('[bridge] redeemCyberSolOnEvm: tx sent, waiting for receipt', { hash: tx.hash });
         const receipt = await tx.wait();
-        return { txHash: receipt.hash, nonce: parseEvmNonce(receipt) };
+        console.log('[bridge] redeemCyberSolOnEvm: receipt received', { hash: receipt.hash, status: receipt.status, logs: receipt.logs.length });
+        const nonce = parseEvmNonce(receipt);
+        console.log('[bridge] redeemCyberSolOnEvm: parsed nonce', { nonce });
+        return { txHash: receipt.hash, nonce };
     };
 
     // ---------------------------------------------------------------
@@ -160,15 +165,20 @@ export const useBridge = () => {
         tx.feePayer = userPubkey;
         tx.add(ix);
 
+        console.log('[bridge] lockNativeOnSolana: signing and sending tx');
         const { signature } = await phantom.signAndSendTransaction(tx);
+        console.log('[bridge] lockNativeOnSolana: tx sent, confirming', { signature });
         await connection.confirmTransaction(signature, 'confirmed');
+        console.log('[bridge] lockNativeOnSolana: tx confirmed');
 
         const txInfo = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        console.log('[bridge] lockNativeOnSolana: fetched tx info', { found: !!txInfo, logs: txInfo?.meta?.logMessages });
         let nonce = 0;
         for (const log of txInfo?.meta?.logMessages ?? []) {
             const m = log.match(/nonce=(\d+)/);
             if (m) { nonce = parseInt(m[1], 10); break; }
         }
+        console.log('[bridge] lockNativeOnSolana: parsed nonce', { nonce });
 
         return { txHash: signature, nonce };
     };
