@@ -47,7 +47,9 @@ class BridgeService
             $amountWei = bcmul($request->amount, bcpow('10', '18'));
             $amountWei = explode('.', $amountWei)[0];
 
-            $hardhatDir = base_path('/../../crypto/hardhat');
+            $hardhatDir = Environment::isProduction()
+                ? '/singularity/crypto/hardhat'
+                : base_path('/../../crypto/hardhat');
 
             $result = Process::path($hardhatDir)
                 ->timeout(120)
