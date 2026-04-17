@@ -454,7 +454,7 @@ const statusColor = (status: string) => {
             <div class="flex w-full gap-3">
                 <!-- EVM Wallet -->
                 <div
-                    class="flex flex-1 items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
+                    class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
                 >
                     <Wallet
                         class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
@@ -501,7 +501,7 @@ const statusColor = (status: string) => {
                     </button>
                     <button
                         v-if="!evmWallet.isConnected.value"
-                        class="shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
+                        class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
                         :disabled="evmWallet.isConnecting.value"
                         @click="handleEvmConnect"
                     >
@@ -515,7 +515,7 @@ const statusColor = (status: string) => {
 
                 <!-- Solana Wallet -->
                 <div
-                    class="flex flex-1 items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
+                    class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
                 >
                     <Wallet
                         class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
@@ -562,7 +562,7 @@ const statusColor = (status: string) => {
                     </button>
                     <button
                         v-if="!solanaWallet.isConnected.value"
-                        class="shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
+                        class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
                         :disabled="solanaWallet.isConnecting.value"
                         @click="handleSolanaConnect"
                     >

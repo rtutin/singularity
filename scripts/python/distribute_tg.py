@@ -16,8 +16,8 @@ DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
 if not DEPLOYER_PK:
     raise ValueError("DEPLOYER_PK not set")
 
-TOKEN_ADDRESS = "0x02Bad7dCaD174D92FCE2baBBd0cE1A653b487f04"
-RPC_URL = "http://195.166.164.94:8545"
+TOKEN_ADDRESS = "0x5847FB699d0923A9AEd7473ef5EA8ef0c2Cd05c8"
+RPC_URL = "https://rpc.cyberia.church"
 CHAIN_ID = 49406
 
 TOKEN_ABI = [
@@ -46,8 +46,22 @@ account = w3.eth.account.from_key(DEPLOYER_PK)
 contract = w3.eth.contract(address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI)
 
 
+def ensure_schema():
+    """Create the tg_wallets table if it does not exist."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tg_wallets (
+                user_id  INTEGER PRIMARY KEY,
+                address  TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """))
+
+
 def mint_and_distribute():
     logger.info(f"Starting distribution at {datetime.now()}")
+
+    ensure_schema()
 
     with engine.connect() as conn:
         wallets = conn.execute(text("SELECT user_id, address FROM tg_wallets")).fetchall()
