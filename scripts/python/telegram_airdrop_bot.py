@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TelegramError
 from telegram.request import HTTPXRequest
@@ -245,10 +245,25 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
 
+async def post_init(application: Application):
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Start receiving TG"),
+            BotCommand("help", "Show available commands"),
+            BotCommand("set_wallet", "Set your wallet address"),
+            BotCommand("stop", "Stop receiving TG"),
+            BotCommand("balance", "Check your TG balance"),
+            BotCommand("github", "Link GitHub for GITHUB airdrop"),
+            BotCommand("website", "Open the project website"),
+        ]
+    )
+    logger.info("Bot commands published to Telegram")
+
+
 def run_dispatcher():
     logger.info("Building application...")
 
-    builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
+    builder = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init)
 
     if HTTP_PROXY:
         proxy_url = HTTP_PROXY
@@ -270,6 +285,7 @@ def run_dispatcher():
     application.add_handler(CommandHandler("set_wallet", set_wallet_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("balance", balance_command))
+    application.add_handler(CommandHandler("github", github_command))
     application.add_handler(CommandHandler("website", website_command))
 
     application.add_error_handler(error_handler)

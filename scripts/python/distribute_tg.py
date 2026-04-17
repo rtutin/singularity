@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.environ.get("DB_PATH", "/home/lain/random/singularity/backend/laravel/database/database.sqlite")
+DB_PATH = os.environ.get("DB_PATH", "/root/singularity/backend/laravel/database/database.sqlite")
 DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
 if not DEPLOYER_PK:
     raise ValueError("DEPLOYER_PK not set")
