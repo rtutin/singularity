@@ -99,11 +99,6 @@ const destTokenLabel = computed(() =>
 
 const sourceBalance = computed(() => {
     if (bridgeDirection.value === 'evm_to_sol') {
-        console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
-        setTimeout(() => {
-console.log('EVM CYBER.sol balance:', bridge.cyberSolBalance.value);
-        }, 2000);
-    
         // Sending CYBER.sol from EVM back to Solana
         return bridge.cyberSolBalance.value;
     }
@@ -118,6 +113,20 @@ const evmCyberSolDisplay = computed(() =>
 const solCyberSolDisplay = computed(() =>
     bridge.solanaCyberBalance.value ? parseFloat(bridge.solanaCyberBalance.value).toFixed(4) : null,
 );
+
+const BRIDGE_FEE_RATE = 0.01;
+
+const bridgeFee = computed(() => {
+    const amt = parseFloat(bridgeAmount.value);
+    if (!amt || amt <= 0) return null;
+    return (amt * BRIDGE_FEE_RATE).toFixed(6);
+});
+
+const amountAfterFee = computed(() => {
+    const amt = parseFloat(bridgeAmount.value);
+    if (!amt || amt <= 0) return null;
+    return (amt * (1 - BRIDGE_FEE_RATE)).toFixed(6);
+});
 
 const amountExceedsBalance = computed(() => {
     const amt = parseFloat(bridgeAmount.value);
@@ -666,7 +675,7 @@ const statusColor = (status: string) => {
 
                 <!-- Destination -->
                 <div
-                    class="rounded-lg bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]"
+                    class="rounded-t-lg bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]"
                 >
                     <div class="mb-2 flex items-center justify-between">
                         <span
@@ -683,11 +692,7 @@ const statusColor = (status: string) => {
                         <span
                             class="text-2xl font-light text-[#1b1b18] dark:text-[#EDEDEC]"
                         >
-                            {{
-                                bridgeAmount
-                                    ? bridgeAmount
-                                    : '0.0'
-                            }}
+                            {{ amountAfterFee ?? '0.0' }}
                         </span>
                         <span
                             class="shrink-0 rounded-full bg-[#19140010] px-3 py-1 text-xs font-medium text-[#1b1b18] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
@@ -695,6 +700,19 @@ const statusColor = (status: string) => {
                             {{ destTokenLabel }}
                         </span>
                     </div>
+                </div>
+
+                <!-- Fee -->
+                <div
+                    v-if="bridgeFee"
+                    class="flex items-center justify-between rounded-b-lg bg-[#19140008] px-4 py-2 dark:bg-[#1a1a17]"
+                >
+                    <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]">
+                        Bridge fee (1%)
+                    </span>
+                    <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]">
+                        {{ bridgeFee }} {{ sourceTokenLabel }}
+                    </span>
                 </div>
 
                 <!-- Submit -->

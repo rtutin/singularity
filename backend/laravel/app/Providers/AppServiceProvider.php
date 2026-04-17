@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Environment;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +25,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        URL::forceHttps();
+        if (Environment::isProduction()) {
+            URL::forceHttps();
+        }
+
         $this->configureDefaults();
     }
 

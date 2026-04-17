@@ -18,6 +18,8 @@ const account = privateKeyToAccount(pk);
 
 const BRIDGE_ADDRESS = "0x9dA2781a1b71950EEd25C84Dc26AB683AE63aa39" as const;
 
+const RPC_URL = process.env.CYBERIA_RPC_URL || "http://polygon-edge:8545";
+
 const chain = {
   ...mainnet,
   id: 49406,
@@ -27,13 +29,13 @@ const chain = {
 
 const walletClient = createWalletClient({
   chain,
-  transport: http("http://195.166.164.94:8545"),
+  transport: http(RPC_URL),
   account,
 });
 
 const publicClient = createPublicClient({
   chain,
-  transport: http("http://195.166.164.94:8545"),
+  transport: http(RPC_URL),
 });
 
 const bridgeAbi = parseAbi([
