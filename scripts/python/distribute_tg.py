@@ -72,6 +72,8 @@ def mint_and_distribute():
 
     logger.info(f"Distributing to {len(wallets)} wallets")
 
+    nonce = w3.eth.get_transaction_count(account.address)
+
     for user_id, address in wallets:
         try:
             checksum_addr = Web3.to_checksum_address(address)
@@ -79,7 +81,7 @@ def mint_and_distribute():
 
             tx = contract.functions.mint(checksum_addr, amount).build_transaction({
                 "from": account.address,
-                "nonce": w3.eth.get_transaction_count(account.address),
+                "nonce": nonce,
                 "gas": 100000,
                 "gasPrice": w3.eth.gas_price,
                 "chainId": CHAIN_ID,
@@ -90,9 +92,11 @@ def mint_and_distribute():
             receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
             logger.info(f"Minted 1 TG to {address} (tx: {tx_hash.hex()})")
+            nonce += 1
 
         except Exception as e:
             logger.error(f"Failed to mint to {address}: {e}")
+            nonce += 1
 
     logger.info("Distribution complete")
 
