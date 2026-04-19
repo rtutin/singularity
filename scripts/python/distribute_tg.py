@@ -72,7 +72,7 @@ def mint_and_distribute():
 
     logger.info(f"Distributing to {len(wallets)} wallets")
 
-    nonce = w3.eth.get_transaction_count(account.address)
+    nonce = w3.eth.get_transaction_count(account.address, "pending")
 
     for user_id, address in wallets:
         try:
