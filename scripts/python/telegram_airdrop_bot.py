@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import logging
@@ -46,8 +47,48 @@ TOKEN_ABI = [
     },
 ]
 
-RPC_URL = "http://195.166.164.94:8545"
-CHAIN_ID = 49406
+RPC_URL = os.environ.get("RPC_URL", "https://rpc.cyberia.church")
+CHAIN_ID = int(os.environ.get("CHAIN_ID", "49406"))
+
+TELEGRAM_TOKEN_FACTORY = os.environ.get("TELEGRAM_TOKEN_FACTORY")
+DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
+
+FACTORY_ABI = [
+    {
+        "inputs": [
+            {"name": "name_", "type": "string"},
+            {"name": "symbol_", "type": "string"},
+            {"name": "chatId", "type": "int64"},
+            {"name": "tokenOwner", "type": "address"},
+        ],
+        "name": "createToken",
+        "outputs": [{"name": "token", "type": "address"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "", "type": "int64"}],
+        "name": "tokenOfChat",
+        "outputs": [{"name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "name": "chatId", "type": "int64"},
+            {"indexed": True, "name": "token", "type": "address"},
+            {"indexed": True, "name": "owner", "type": "address"},
+            {"indexed": False, "name": "name", "type": "string"},
+            {"indexed": False, "name": "symbol", "type": "string"},
+        ],
+        "name": "TokenCreated",
+        "type": "event",
+    },
+]
+
+MIN_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MIN_REWARDS_INTERVAL_SECONDS", "60"))
+MAX_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MAX_REWARDS_INTERVAL_SECONDS", str(30 * 24 * 3600)))
 
 LOG_FILE = Path(__file__).parent / "bot.log"
 
@@ -90,6 +131,114 @@ def is_valid_eth_address(address: str) -> bool:
     return address.startswith("0x") and len(address) == 42
 
 
+_INTERVAL_UNITS = {
+    "s": 1,
+    "sec": 1,
+    "secs": 1,
+    "m": 60,
+    "min": 60,
+    "mins": 60,
+    "h": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "d": 86400,
+    "day": 86400,
+    "days": 86400,
+    "w": 7 * 86400,
+    "wk": 7 * 86400,
+    "weeks": 7 * 86400,
+}
+
+_INTERVAL_RE = re.compile(r"^\s*(\d+)\s*([a-zA-Z]*)\s*$")
+
+
+def parse_interval(value: str) -> int:
+    """Parse '1h', '30m', '2d', '90', etc. into seconds. Raises ValueError."""
+    match = _INTERVAL_RE.match(value or "")
+    if not match:
+        raise ValueError(f"invalid interval: {value!r}")
+    num = int(match.group(1))
+    unit = (match.group(2) or "s").lower()
+    if unit not in _INTERVAL_UNITS:
+        raise ValueError(f"unknown interval unit: {unit!r}")
+    seconds = num * _INTERVAL_UNITS[unit]
+    if seconds < MIN_REWARDS_INTERVAL_SECONDS:
+        raise ValueError(f"interval too small (min {MIN_REWARDS_INTERVAL_SECONDS}s)")
+    if seconds > MAX_REWARDS_INTERVAL_SECONDS:
+        raise ValueError(f"interval too large (max {MAX_REWARDS_INTERVAL_SECONDS}s)")
+    return seconds
+
+
+def format_interval(seconds: int) -> str:
+    for label, div in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds % div == 0 and seconds >= div:
+            return f"{seconds // div}{label}"
+    return f"{seconds}s"
+
+
+def slugify_symbol(name: str) -> str:
+    """Derive a short ERC20 symbol from a human-readable name."""
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", name).upper()
+    if not cleaned:
+        cleaned = "CHAT"
+    return cleaned[:8]
+
+
+def ensure_chat_token_schema():
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS chat_tokens (
+                chat_id           INTEGER PRIMARY KEY,
+                name              TEXT NOT NULL,
+                symbol            TEXT NOT NULL,
+                token_address     TEXT,
+                rewards_interval  INTEGER NOT NULL,
+                reward_amount     TEXT NOT NULL DEFAULT '1000000000000000000',
+                created_by        INTEGER NOT NULL,
+                created_at        TEXT DEFAULT (datetime('now')),
+                last_payout_at    TEXT
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS chat_token_wallets (
+                chat_id     INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                address     TEXT    NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (chat_id, user_id)
+            )
+        """))
+
+
+ensure_chat_token_schema()
+
+
+async def is_chat_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None:
+        return False
+    # private chats: owner by definition
+    if chat.type == "private":
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        return member.status in ("creator", "administrator")
+    except TelegramError as e:
+        logger.warning(f"get_chat_member failed for chat {chat.id} user {user.id}: {e}")
+        return False
+
+
+def get_chat_token(chat_id: int):
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT chat_id, name, symbol, token_address, rewards_interval, reward_amount "
+                 "FROM chat_tokens WHERE chat_id = :c"),
+            {"c": chat_id},
+        ).fetchone()
+    return row
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Hi! I'll send you 1 TG token every hour on Cyberia (49406). "
@@ -102,9 +251,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Commands:\n"
         "/start - start receiving TG\n"
-        "/set_wallet <address> - set your wallet\n"
+        "/set_wallet <address> - set your wallet (global or per-chat)\n"
         "/stop - stop receiving\n"
         "/balance - check balance\n"
+        "/create_token <name> <interval> - (group admins) create a chat reward token\n"
+        "   e.g. /create_token MyChatToken 1h\n"
         "/github <username> <address> - link GitHub for GITHUB token airdrop\n"
         "/website - project website"
     )
@@ -153,6 +304,166 @@ async def github_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error saving. Try again.")
 
 
+async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /create_token <name> <rewards_interval>
+    Creates a per-chat ERC20Votes reward token via the on-chain factory and
+    wires it to this chat. Only chat admins can run it; must be used from the
+    target group/supergroup.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None:
+        return
+
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text(
+            "This command must be used inside a group chat."
+        )
+        return
+
+    if not await is_chat_admin(update, context):
+        await update.message.reply_text("Only chat admins can create a token.")
+        return
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Usage: /create_token <name> <rewards_interval>\n"
+            "Example: /create_token MyChatToken 1h\n"
+            "Intervals: 30s, 15m, 1h, 2d, 1w"
+        )
+        return
+
+    # name may contain spaces if the user passes them; last token is always the interval
+    name = " ".join(args[:-1]).strip()
+    interval_raw = args[-1]
+
+    if not name or len(name) > 48:
+        await update.message.reply_text("Token name must be 1..48 characters.")
+        return
+
+    try:
+        rewards_interval = parse_interval(interval_raw)
+    except ValueError as e:
+        await update.message.reply_text(
+            f"Bad interval: {e}\nExamples: 30s, 15m, 1h, 2d, 1w"
+        )
+        return
+
+    existing = get_chat_token(chat.id)
+    if existing is not None:
+        await update.message.reply_text(
+            f"This chat already has a token: {existing[1]} ({existing[2]})\n"
+            f"Address: {existing[3] or 'pending'}\n"
+            f"Interval: {format_interval(existing[4])}"
+        )
+        return
+
+    if not TELEGRAM_TOKEN_FACTORY or not DEPLOYER_PK:
+        await update.message.reply_text(
+            "Token creation is not configured on this bot "
+            "(TELEGRAM_TOKEN_FACTORY / DEPLOYER_PK missing). Please contact the operator."
+        )
+        return
+
+    symbol = slugify_symbol(name)
+
+    # Persist the request first so we never lose it if the on-chain call blows up.
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO chat_tokens
+                        (chat_id, name, symbol, rewards_interval, created_by)
+                    VALUES
+                        (:chat_id, :name, :symbol, :interval, :user_id)
+                """),
+                {
+                    "chat_id": chat.id,
+                    "name": name,
+                    "symbol": symbol,
+                    "interval": rewards_interval,
+                    "user_id": user.id,
+                },
+            )
+    except Exception as e:
+        logger.error(f"Error persisting chat_token row for chat {chat.id}: {e}")
+        await update.message.reply_text("Internal error saving token. Try again.")
+        return
+
+    status_msg = await update.message.reply_text(
+        f"Deploying token {name} ({symbol})... this may take a few seconds."
+    )
+
+    # On-chain deployment
+    try:
+        from web3 import Web3
+
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        acct = w3.eth.account.from_key(DEPLOYER_PK)
+        factory = w3.eth.contract(
+            address=Web3.to_checksum_address(TELEGRAM_TOKEN_FACTORY),
+            abi=FACTORY_ABI,
+        )
+
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        tx = factory.functions.createToken(
+            name, symbol, int(chat.id), acct.address
+        ).build_transaction({
+            "from": acct.address,
+            "nonce": nonce,
+            "gas": 3_500_000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        })
+        signed = acct.sign_transaction(tx)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+
+        if receipt.status != 1:
+            raise RuntimeError(f"tx reverted: {tx_hash.hex()}")
+
+        # Try to pull token address from event; fall back to view call.
+        token_address = None
+        try:
+            events = factory.events.TokenCreated().process_receipt(receipt)
+            if events:
+                token_address = events[0]["args"]["token"]
+        except Exception:
+            token_address = None
+
+        if not token_address:
+            token_address = factory.functions.tokenOfChat(int(chat.id)).call()
+
+        token_address = Web3.to_checksum_address(token_address)
+    except Exception as e:
+        logger.error(f"On-chain createToken failed for chat {chat.id}: {e}")
+        # Roll back the DB row so the user can retry.
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM chat_tokens WHERE chat_id = :c AND token_address IS NULL"),
+                {"c": chat.id},
+            )
+        await status_msg.edit_text(f"On-chain deployment failed: {e}")
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE chat_tokens SET token_address = :addr WHERE chat_id = :c"),
+            {"addr": token_address, "c": chat.id},
+        )
+
+    await status_msg.edit_text(
+        "Token created!\n"
+        f"Name: {name}\n"
+        f"Symbol: {symbol}\n"
+        f"Address: {token_address}\n"
+        f"Rewards interval: {format_interval(rewards_interval)}\n\n"
+        "Members: run /set_wallet <address> here to join the airdrop."
+    )
+
+
 async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -161,12 +472,35 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     address = args[0].strip()
     user_id = update.effective_user.id
+    chat = update.effective_chat
 
     if not is_valid_eth_address(address):
         await update.message.reply_text("Invalid address format. Expected 0x...")
         return
 
+    # If this chat has its own token, register under that chat.
+    chat_token = None
+    if chat is not None and chat.type in ("group", "supergroup"):
+        chat_token = get_chat_token(chat.id)
+
     try:
+        if chat_token is not None:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("""
+                        INSERT INTO chat_token_wallets (chat_id, user_id, address)
+                        VALUES (:chat_id, :user_id, :address)
+                        ON CONFLICT(chat_id, user_id) DO UPDATE SET address = :address
+                    """),
+                    {"chat_id": chat.id, "user_id": user_id, "address": address},
+                )
+            await update.message.reply_text(
+                f"Registered {address[:6]}...{address[-4:]} for {chat_token[1]} "
+                f"({chat_token[2]}). Rewards every {format_interval(chat_token[4])}."
+            )
+            return
+
+        # Fallback: global TG airdrop (existing behaviour).
         with engine.connect() as conn:
             result = conn.execute(
                 text("SELECT address FROM tg_wallets WHERE user_id = :user_id"),
@@ -255,6 +589,7 @@ async def post_init(application: Application):
             BotCommand("balance", "Check your TG balance"),
             BotCommand("github", "Link GitHub for GITHUB airdrop"),
             BotCommand("website", "Open the project website"),
+            BotCommand("create_token", "(admins) Create a chat reward token"),
         ]
     )
     logger.info("Bot commands published to Telegram")
@@ -287,6 +622,7 @@ def run_dispatcher():
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("github", github_command))
     application.add_handler(CommandHandler("website", website_command))
+    application.add_handler(CommandHandler("create_token", create_token_command))
 
     application.add_error_handler(error_handler)
 
