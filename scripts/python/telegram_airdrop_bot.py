@@ -408,12 +408,20 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
         nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        try:
+            estimated = factory.functions.createToken(
+                name, symbol, int(chat.id), acct.address
+            ).estimate_gas({"from": acct.address})
+        except Exception as est_err:
+            logger.warning(f"estimate_gas failed, falling back to 5_000_000: {est_err}")
+            estimated = 5_000_000
+        gas_limit = int(estimated * 1.25) + 50_000
         tx = factory.functions.createToken(
             name, symbol, int(chat.id), acct.address
         ).build_transaction({
             "from": acct.address,
             "nonce": nonce,
-            "gas": 3_500_000,
+            "gas": gas_limit,
             "gasPrice": w3.eth.gas_price,
             "chainId": CHAIN_ID,
         })
