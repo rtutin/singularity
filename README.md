@@ -7,7 +7,7 @@
 
 # Network config
 - network name: cyberia
-- URL RPC: https://rpc.cyberia.church
+- URL RPC: http://rpc.cyberia.church:8545
 - Chain ID: 49406
 - Token: CYBER
 
