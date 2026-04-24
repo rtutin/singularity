@@ -16,7 +16,7 @@ DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
 if not DEPLOYER_PK:
     raise ValueError("DEPLOYER_PK not set")
 
-TOKEN_ADDRESS = "0x4A3B5919e60fd290172955753DdA9216E396170A"
+TOKEN_ADDRESS = "0x3d32FE83ad0C1157fdDCA0a3280764c495cdAD6D"
 RPC_URL = "https://rpc.cyberia.church"
 CHAIN_ID = 49406
 
@@ -75,11 +75,13 @@ def mint_and_distribute():
     nonce = w3.eth.get_transaction_count(account.address, "pending")
     success_count = 0
     failed_count = 0
+    amount = 1 * 10**18
 
     for user_id, address in wallets:
         try:
             checksum_addr = Web3.to_checksum_address(address)
-            amount = 1 * 10**18
+            # Preflight the call first so ABI/ownership mismatches fail before broadcast.
+            contract.functions.mint(checksum_addr, amount).call({"from": account.address})
 
             tx = contract.functions.mint(checksum_addr, amount).build_transaction({
                 "from": account.address,

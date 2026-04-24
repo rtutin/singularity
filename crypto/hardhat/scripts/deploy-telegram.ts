@@ -31,7 +31,7 @@ console.log("Deploying Telegram from:", client.account.address);
 const hash = await client.deployContract({
   abi: artifact.abi,
   bytecode: artifact.bytecode,
-  args: [],
+  args: [client.account.address],
 });
 
 console.log("Transaction hash:", hash);
