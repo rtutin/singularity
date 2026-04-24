@@ -4,8 +4,8 @@ Distribute per-chat Telegram reward tokens.
 For each row in `chat_tokens`:
   * skip if `token_address` is NULL (deployment in-flight)
   * skip if `last_payout_at + rewards_interval` is still in the future
-  * otherwise mint `reward_amount` to every wallet in `chat_token_wallets`
-    for that chat, then bump `last_payout_at`.
+  * otherwise mint `reward_amount` to every registered wallet in `tg_wallets`
+    for members of that chat, then bump `last_payout_at`.
 
 Intended to be run by cron / systemd timer as frequently as the shortest
 desired rewards interval (e.g. every minute).

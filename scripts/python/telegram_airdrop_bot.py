@@ -526,14 +526,13 @@ async def set_rewards_interval_command(update: Update, context: ContextTypes.DEF
 
 
 def _get_chat_payout_recipients(chat_id: int):
-    """Return list of (user_id, address) for users who are known members of
-    the given chat and have a wallet registered via /set_wallet."""
+    """Return chat members with wallet addresses from the global tg_wallets table."""
     with engine.connect() as conn:
         return conn.execute(
             text("""
-                SELECT cm.user_id, w.address
+                SELECT cm.user_id, wallets.address
                 FROM chat_members cm
-                JOIN tg_wallets w ON w.user_id = cm.user_id
+                JOIN tg_wallets wallets ON wallets.user_id = cm.user_id
                 WHERE cm.chat_id = :c
             """),
             {"c": chat_id},
@@ -569,7 +568,7 @@ async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     recipients = _get_chat_payout_recipients(chat.id)
     if not recipients:
         await update.message.reply_text(
-            "No eligible recipients: no members with /set_wallet registered here."
+            "No eligible recipients: no chat members have a wallet in tg_wallets."
         )
         return
 
