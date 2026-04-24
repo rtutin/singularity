@@ -176,11 +176,52 @@ def format_interval(seconds: int) -> str:
     return f"{seconds}s"
 
 
-def slugify_symbol(name: str) -> str:
+_CYRILLIC_TRANSLIT = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+}
+
+
+def transliterate_name(value: str) -> str:
+    return "".join(_CYRILLIC_TRANSLIT.get(char.lower(), char) for char in value)
+
+
+def slugify_symbol(name: str, chat_id: int) -> str:
     """Derive a short ERC20 symbol from a human-readable name."""
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "", name).upper()
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", transliterate_name(name)).upper()
     if not cleaned:
-        cleaned = "CHAT"
+        return f"CHAT{abs(chat_id)}"
     return cleaned[:8]
 
 
@@ -376,7 +417,7 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    symbol = slugify_symbol(name)
+    symbol = slugify_symbol(name, chat.id)
 
     # Persist the request first so we never lose it if the on-chain call blows up.
     try:
