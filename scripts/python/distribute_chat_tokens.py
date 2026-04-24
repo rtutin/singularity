@@ -125,6 +125,8 @@ def distribute():
         )
         amount = int(reward_amount)
         nonce = w3.eth.get_transaction_count(account.address, "pending")
+        success_count = 0
+        failed_count = 0
 
         for user_id, address in wallets:
             try:
@@ -138,21 +140,50 @@ def distribute():
                 })
                 signed = account.sign_transaction(tx)
                 tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-                w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-                logger.info(
-                    "chat %s: minted %s (%s) -> %s tx=%s",
-                    chat_id, reward_amount, symbol, address, tx_hash.hex(),
-                )
+                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                if receipt.status != 1:
+                    failed_count += 1
+                    logger.error(
+                        "chat %s: mint failed %s (%s) -> %s tx=%s block=%s status=%s",
+                        chat_id,
+                        reward_amount,
+                        symbol,
+                        address,
+                        tx_hash.hex(),
+                        receipt.blockNumber,
+                        receipt.status,
+                    )
+                else:
+                    success_count += 1
+                    logger.info(
+                        "chat %s: minted %s (%s) -> %s tx=%s block=%s",
+                        chat_id,
+                        reward_amount,
+                        symbol,
+                        address,
+                        tx_hash.hex(),
+                        receipt.blockNumber,
+                    )
                 nonce += 1
             except Exception as e:
+                failed_count += 1
                 logger.error("chat %s: mint to %s failed: %s", chat_id, address, e)
                 nonce += 1
 
-        with engine.begin() as conn:
-            conn.execute(
-                text("UPDATE chat_tokens SET last_payout_at = :t WHERE chat_id = :c"),
-                {"t": now.strftime("%Y-%m-%d %H:%M:%S"), "c": chat_id},
-            )
+        if success_count > 0:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE chat_tokens SET last_payout_at = :t WHERE chat_id = :c"),
+                    {"t": now.strftime("%Y-%m-%d %H:%M:%S"), "c": chat_id},
+                )
+
+        logger.info(
+            "chat %s (%s): distribution complete, %d succeeded, %d failed",
+            chat_id,
+            symbol,
+            success_count,
+            failed_count,
+        )
 
     logger.info("Distribution complete")
 

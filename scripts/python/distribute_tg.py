@@ -16,7 +16,7 @@ DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
 if not DEPLOYER_PK:
     raise ValueError("DEPLOYER_PK not set")
 
-TOKEN_ADDRESS = "0x5847FB699d0923A9AEd7473ef5EA8ef0c2Cd05c8"
+TOKEN_ADDRESS = "0x4A3B5919e60fd290172955753DdA9216E396170A"
 RPC_URL = "https://rpc.cyberia.church"
 CHAIN_ID = 49406
 
@@ -73,6 +73,8 @@ def mint_and_distribute():
     logger.info(f"Distributing to {len(wallets)} wallets")
 
     nonce = w3.eth.get_transaction_count(account.address, "pending")
+    success_count = 0
+    failed_count = 0
 
     for user_id, address in wallets:
         try:
@@ -91,14 +93,35 @@ def mint_and_distribute():
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
             receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
-            logger.info(f"Minted 1 TG to {address} (tx: {tx_hash.hex()})")
+            if receipt.status != 1:
+                failed_count += 1
+                logger.error(
+                    "Mint failed for %s (tx: %s, block: %s, status: %s)",
+                    address,
+                    tx_hash.hex(),
+                    receipt.blockNumber,
+                    receipt.status,
+                )
+            else:
+                success_count += 1
+                logger.info(
+                    "Minted 1 TG to %s (tx: %s, block: %s)",
+                    address,
+                    tx_hash.hex(),
+                    receipt.blockNumber,
+                )
             nonce += 1
 
         except Exception as e:
+            failed_count += 1
             logger.error(f"Failed to mint to {address}: {e}")
             nonce += 1
 
-    logger.info("Distribution complete")
+    logger.info(
+        "Distribution complete: %d succeeded, %d failed",
+        success_count,
+        failed_count,
+    )
 
 
 if __name__ == "__main__":
