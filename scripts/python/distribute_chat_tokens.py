@@ -96,7 +96,12 @@ def distribute():
 
         with engine.connect() as conn:
             wallets = conn.execute(
-                text("SELECT user_id, address FROM chat_token_wallets WHERE chat_id = :c"),
+                text("""
+                    SELECT cm.user_id, w.address
+                    FROM chat_members cm
+                    JOIN tg_wallets w ON w.user_id = cm.user_id
+                    WHERE cm.chat_id = :c
+                """),
                 {"c": chat_id},
             ).fetchall()
 

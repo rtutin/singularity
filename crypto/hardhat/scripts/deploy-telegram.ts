@@ -22,7 +22,7 @@ const client = createWalletClient({
     name: "Cyberia",
     nativeCurrency: { name: "Cyber", symbol: "CYBER", decimals: 18 },
   },
-  transport: http("http://195.166.164.94:8545"),
+  transport: http("https://rpc.cyberia.church"),
   account,
 });
 
@@ -31,7 +31,7 @@ console.log("Deploying Telegram from:", client.account.address);
 const hash = await client.deployContract({
   abi: artifact.abi,
   bytecode: artifact.bytecode,
-  args: [client.account.address],
+  args: [],
 });
 
 console.log("Transaction hash:", hash);
@@ -43,7 +43,7 @@ const publicClient = createPublicClient({
     name: "Cyberia",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   },
-  transport: http("http://195.166.164.94:8545"),
+  transport: http("https://rpc.cyberia.church"),
 });
 
 const receipt = await publicClient.waitForTransactionReceipt({ hash });

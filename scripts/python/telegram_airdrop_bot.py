@@ -26,7 +26,7 @@ HTTP_PROXY = os.environ.get("HTTP_PROXY")
 
 DB_PATH = os.environ.get("DB_PATH", "/home/lain/random/singularity/backend/laravel/database/database.sqlite")
 
-TOKEN_ADDRESS = "0x02Bad7dCaD174D92FCE2baBBd0cE1A653b487f04"
+TOKEN_ADDRESS = "0x4A3B5919e60fd290172955753DdA9216E396170A"
 TOKEN_ABI = [
     {
         "inputs": [
@@ -200,12 +200,19 @@ def ensure_chat_token_schema():
             )
         """))
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS chat_token_wallets (
-                chat_id     INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                address     TEXT    NOT NULL,
-                created_at  TEXT DEFAULT (datetime('now')),
+            CREATE TABLE IF NOT EXISTS chat_members (
+                chat_id    INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                first_seen TEXT DEFAULT (datetime('now')),
+                last_seen  TEXT DEFAULT (datetime('now')),
                 PRIMARY KEY (chat_id, user_id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tg_wallets (
+                user_id    INTEGER PRIMARY KEY,
+                address    TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
             )
         """))
 
@@ -251,11 +258,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Commands:\n"
         "/start - start receiving TG\n"
-        "/set_wallet <address> - set your wallet (global or per-chat)\n"
+        "/set_wallet <address> - link your wallet once, receive from every chat you join\n"
         "/stop - stop receiving\n"
         "/balance - check balance\n"
-        "/create_token <name> <interval> - (group admins) create a chat reward token\n"
+        "/create_token <name> <interval> - (admins) create a chat reward token\n"
         "   e.g. /create_token MyChatToken 1h\n"
+        "/set_rewards_interval <interval> - (admins) change payout interval\n"
+        "/reward_now - (admins) trigger an extra payout right now\n"
         "/github <username> <address> - link GitHub for GITHUB token airdrop\n"
         "/website - project website"
     )
@@ -472,6 +481,160 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+async def set_rewards_interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/set_rewards_interval <interval> — admin-only, changes how often rewards are paid."""
+    chat = update.effective_chat
+    if chat is None or chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("Use this command in the group chat that owns the token.")
+        return
+    if not await is_chat_admin(update, context):
+        await update.message.reply_text("Only chat admins can change the rewards interval.")
+        return
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: /set_rewards_interval <interval>\nExamples: 30s, 15m, 1h, 2d, 1w"
+        )
+        return
+
+    try:
+        rewards_interval = parse_interval(args[0])
+    except ValueError as e:
+        await update.message.reply_text(f"Bad interval: {e}")
+        return
+
+    chat_token = get_chat_token(chat.id)
+    if chat_token is None:
+        await update.message.reply_text("This chat has no token yet. Use /create_token first.")
+        return
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE chat_tokens SET rewards_interval = :i WHERE chat_id = :c"),
+                {"i": rewards_interval, "c": chat.id},
+            )
+    except Exception as e:
+        logger.error(f"set_rewards_interval db error: {e}")
+        await update.message.reply_text("Internal error. Try again.")
+        return
+
+    await update.message.reply_text(
+        f"Rewards interval updated: {format_interval(rewards_interval)}."
+    )
+
+
+def _get_chat_payout_recipients(chat_id: int):
+    """Return list of (user_id, address) for users who are known members of
+    the given chat and have a wallet registered via /set_wallet."""
+    with engine.connect() as conn:
+        return conn.execute(
+            text("""
+                SELECT cm.user_id, w.address
+                FROM chat_members cm
+                JOIN tg_wallets w ON w.user_id = cm.user_id
+                WHERE cm.chat_id = :c
+            """),
+            {"c": chat_id},
+        ).fetchall()
+
+
+async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/reward_now — admin-only, trigger an immediate payout without touching the timer."""
+    chat = update.effective_chat
+    if chat is None or chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("Use this command in the group chat that owns the token.")
+        return
+    if not await is_chat_admin(update, context):
+        await update.message.reply_text("Only chat admins can trigger a payout.")
+        return
+
+    chat_token = get_chat_token(chat.id)
+    if chat_token is None:
+        await update.message.reply_text("This chat has no token yet. Use /create_token first.")
+        return
+
+    _chat_id_col, name, symbol, token_address, _interval, reward_amount = chat_token
+    if not token_address:
+        await update.message.reply_text("Token deployment is still pending. Try again later.")
+        return
+
+    if not DEPLOYER_PK:
+        await update.message.reply_text(
+            "Payouts are not configured on this bot (DEPLOYER_PK missing)."
+        )
+        return
+
+    recipients = _get_chat_payout_recipients(chat.id)
+    if not recipients:
+        await update.message.reply_text(
+            "No eligible recipients: no members with /set_wallet registered here."
+        )
+        return
+
+    amount_human = int(reward_amount) / 10**18
+    status_msg = await update.message.reply_text(
+        f"Minting {amount_human} {symbol} to {len(recipients)} wallet(s)..."
+    )
+
+    try:
+        from web3 import Web3
+
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        acct = w3.eth.account.from_key(DEPLOYER_PK)
+        token_abi = [{
+            "inputs": [
+                {"name": "to", "type": "address"},
+                {"name": "amount", "type": "uint256"},
+            ],
+            "name": "mint",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function",
+        }]
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address), abi=token_abi
+        )
+        amount = int(reward_amount)
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+
+        succeeded = 0
+        failed = 0
+        for user_id, address in recipients:
+            try:
+                to = Web3.to_checksum_address(address)
+                tx = contract.functions.mint(to, amount).build_transaction({
+                    "from": acct.address,
+                    "nonce": nonce,
+                    "gas": 150_000,
+                    "gasPrice": w3.eth.gas_price,
+                    "chainId": CHAIN_ID,
+                })
+                signed = acct.sign_transaction(tx)
+                tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+                w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                logger.info(
+                    f"reward_now chat={chat.id} user={user_id} -> {address} tx={tx_hash.hex()}"
+                )
+                nonce += 1
+                succeeded += 1
+            except Exception as e:
+                logger.error(f"reward_now mint failed for {address}: {e}")
+                nonce += 1
+                failed += 1
+    except Exception as e:
+        logger.error(f"reward_now fatal: {e}")
+        await status_msg.edit_text(f"Payout failed: {e}")
+        return
+
+    # Intentionally do NOT update last_payout_at: this is an extra payout.
+    await status_msg.edit_text(
+        f"Payout done: {succeeded} ok, {failed} failed. "
+        "Regular schedule is unchanged."
+    )
+
+
 async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -480,57 +643,27 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     address = args[0].strip()
     user_id = update.effective_user.id
-    chat = update.effective_chat
 
     if not is_valid_eth_address(address):
         await update.message.reply_text("Invalid address format. Expected 0x...")
         return
 
-    # If this chat has its own token, register under that chat.
-    chat_token = None
-    if chat is not None and chat.type in ("group", "supergroup"):
-        chat_token = get_chat_token(chat.id)
-
     try:
-        if chat_token is not None:
-            with engine.begin() as conn:
-                conn.execute(
-                    text("""
-                        INSERT INTO chat_token_wallets (chat_id, user_id, address)
-                        VALUES (:chat_id, :user_id, :address)
-                        ON CONFLICT(chat_id, user_id) DO UPDATE SET address = :address
-                    """),
-                    {"chat_id": chat.id, "user_id": user_id, "address": address},
-                )
-            await update.message.reply_text(
-                f"Registered {address[:6]}...{address[-4:]} for {chat_token[1]} "
-                f"({chat_token[2]}). Rewards every {format_interval(chat_token[4])}."
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO tg_wallets (user_id, address)
+                    VALUES (:user_id, :address)
+                    ON CONFLICT(user_id) DO UPDATE SET address = :address
+                """),
+                {"user_id": user_id, "address": address},
             )
-            return
 
-        # Fallback: global TG airdrop (existing behaviour).
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT address FROM tg_wallets WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            ).fetchone()
-
-            if result:
-                conn.execute(
-                    text("UPDATE tg_wallets SET address = :address WHERE user_id = :user_id"),
-                    {"address": address, "user_id": user_id},
-                )
-                msg = f"Address updated: {address}"
-            else:
-                conn.execute(
-                    text("INSERT INTO tg_wallets (user_id, address) VALUES (:user_id, :address)"),
-                    {"user_id": user_id, "address": address},
-                )
-                msg = f"Address saved: {address}. You'll receive 1 TG every hour!"
-
-            conn.commit()
-
-        await update.message.reply_text(msg)
+        await update.message.reply_text(
+            f"Wallet saved: {address}\n"
+            "You will receive rewards from every chat token in groups you participate in, "
+            "and 1 TG every hour from the global airdrop."
+        )
     except Exception as e:
         logger.error(f"Error in set_wallet: {e}")
         await update.message.reply_text("Error saving address. Try again.")
@@ -583,6 +716,31 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error fetching balance. Try again later.")
 
 
+async def track_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Record (chat_id, user_id) for any message in a group. Used by the payout
+    script to know who is a member of a chat that has its own reward token."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None:
+        return
+    if chat.type not in ("group", "supergroup"):
+        return
+    if user.is_bot:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO chat_members (chat_id, user_id, first_seen, last_seen)
+                    VALUES (:c, :u, datetime('now'), datetime('now'))
+                    ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen = datetime('now')
+                """),
+                {"c": chat.id, "u": user.id},
+            )
+    except Exception as e:
+        logger.debug(f"track_chat_member failed: {e}")
+
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
@@ -598,6 +756,8 @@ async def post_init(application: Application):
             BotCommand("github", "Link GitHub for GITHUB airdrop"),
             BotCommand("website", "Open the project website"),
             BotCommand("create_token", "(admins) Create a chat reward token"),
+            BotCommand("set_rewards_interval", "(admins) Change rewards interval"),
+            BotCommand("reward_now", "(admins) Pay rewards immediately"),
         ]
     )
     logger.info("Bot commands published to Telegram")
@@ -631,6 +791,16 @@ def run_dispatcher():
     application.add_handler(CommandHandler("github", github_command))
     application.add_handler(CommandHandler("website", website_command))
     application.add_handler(CommandHandler("create_token", create_token_command))
+    application.add_handler(CommandHandler("set_rewards_interval", set_rewards_interval_command))
+    application.add_handler(CommandHandler("reward_now", reward_now_command))
+
+    # Track chat membership on any message (non-command, group chats only).
+    application.add_handler(
+        MessageHandler(
+            (filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP) & (~filters.COMMAND),
+            track_chat_member,
+        )
+    )
 
     application.add_error_handler(error_handler)
 
