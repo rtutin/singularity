@@ -539,9 +539,22 @@ def _get_chat_payout_recipients(chat_id: int):
         ).fetchall()
 
 
+def _record_chat_member(chat_id: int, user_id: int):
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO chat_members (chat_id, user_id, first_seen, last_seen)
+                VALUES (:c, :u, datetime('now'), datetime('now'))
+                ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen = datetime('now')
+            """),
+            {"c": chat_id, "u": user_id},
+        )
+
+
 async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/reward_now — admin-only, trigger an immediate payout without touching the timer."""
     chat = update.effective_chat
+    user = update.effective_user
     if chat is None or chat.type not in ("group", "supergroup"):
         await update.message.reply_text("Use this command in the group chat that owns the token.")
         return
@@ -564,6 +577,12 @@ async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Payouts are not configured on this bot (DEPLOYER_PK missing)."
         )
         return
+
+    if user is not None and not user.is_bot:
+        try:
+            _record_chat_member(chat.id, user.id)
+        except Exception as e:
+            logger.debug(f"reward_now member tracking failed: {e}")
 
     recipients = _get_chat_payout_recipients(chat.id)
     if not recipients:
@@ -727,15 +746,7 @@ async def track_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_bot:
         return
     try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                    INSERT INTO chat_members (chat_id, user_id, first_seen, last_seen)
-                    VALUES (:c, :u, datetime('now'), datetime('now'))
-                    ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen = datetime('now')
-                """),
-                {"c": chat.id, "u": user.id},
-            )
+        _record_chat_member(chat.id, user.id)
     except Exception as e:
         logger.debug(f"track_chat_member failed: {e}")
 
@@ -793,12 +804,13 @@ def run_dispatcher():
     application.add_handler(CommandHandler("set_rewards_interval", set_rewards_interval_command))
     application.add_handler(CommandHandler("reward_now", reward_now_command))
 
-    # Track chat membership on any message (non-command, group chats only).
+    # Track chat membership on any group message, including commands.
     application.add_handler(
         MessageHandler(
-            (filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP) & (~filters.COMMAND),
+            filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP,
             track_chat_member,
-        )
+        ),
+        group=1,
     )
 
     application.add_error_handler(error_handler)
