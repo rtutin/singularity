@@ -81,12 +81,14 @@ def mint_and_distribute():
         try:
             checksum_addr = Web3.to_checksum_address(address)
             # Preflight the call first so ABI/ownership mismatches fail before broadcast.
-            contract.functions.mint(checksum_addr, amount).call({"from": account.address})
+            mint_fn = contract.functions.mint(checksum_addr, amount)
+            mint_fn.call({"from": account.address})
+            estimated_gas = mint_fn.estimate_gas({"from": account.address})
 
-            tx = contract.functions.mint(checksum_addr, amount).build_transaction({
+            tx = mint_fn.build_transaction({
                 "from": account.address,
                 "nonce": nonce,
-                "gas": 100000,
+                "gas": max(int(estimated_gas * 1.2), 150000),
                 "gasPrice": w3.eth.gas_price,
                 "chainId": CHAIN_ID,
             })

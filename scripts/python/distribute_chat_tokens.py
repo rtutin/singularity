@@ -131,10 +131,13 @@ def distribute():
         for user_id, address in wallets:
             try:
                 to = Web3.to_checksum_address(address)
-                tx = contract.functions.mint(to, amount).build_transaction({
+                mint_fn = contract.functions.mint(to, amount)
+                mint_fn.call({"from": account.address})
+                estimated_gas = mint_fn.estimate_gas({"from": account.address})
+                tx = mint_fn.build_transaction({
                     "from": account.address,
                     "nonce": nonce,
-                    "gas": 150_000,
+                    "gas": max(int(estimated_gas * 1.2), 180_000),
                     "gasPrice": w3.eth.gas_price,
                     "chainId": CHAIN_ID,
                 })
