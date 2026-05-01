@@ -25,15 +25,29 @@ import './RitualFarmPage.scss';
  */
 
 const ZERO = BigNumber.from(0);
+const ACC_PRECISION = BigNumber.from('1000000000000'); // 1e12 — MasterChef internal scale
 
 interface PoolState {
   allocPoint: BigNumber;
   totalStaked: BigNumber; // chef LP balance
   userStaked: BigNumber;
-  pending: BigNumber;
+  pending: BigNumber; // pending value as of lastSyncBlock (used as a fallback)
   userBalance: BigNumber;
   allowance: BigNumber;
   decimals: number;
+  // Fields needed to project pending forward between RPC reads.
+  lastRewardBlock: BigNumber;
+  accRewardPerShare: BigNumber;
+  rewardDebt: BigNumber;
+}
+
+interface Globals {
+  totalAllocPoint: BigNumber;
+  rewardPerBlock: BigNumber;
+  // Anchor for the virtual-block clock.
+  lastBlockNumber: BigNumber;
+  lastBlockTimestampMs: number;
+  blockTimeMs: number; // estimated block interval
 }
 
 const RitualFarmPage: React.FC = () => {
@@ -49,22 +63,30 @@ const RitualFarmPage: React.FC = () => {
 
   const chef = useContract(chefAddress, RITUAL_MASTERCHEF_ABI);
 
-  const [globals, setGlobals] = useState<{
-    totalAllocPoint: BigNumber;
-    rewardPerBlock: BigNumber;
-  } | null>(null);
+  const [globals, setGlobals] = useState<Globals | null>(null);
   const [poolStates, setPoolStates] = useState<Record<number, PoolState>>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyPid, setBusyPid] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Frame counter — bumped 5×/sec to drive smooth pending-reward animation.
+  // Reading `tick` keeps it in the dependency graph so the projector below
+  // recomputes on every interval tick.
+  const [tick, setTick] = useState(0);
+  void tick;
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  // Refresh on every new block (cheap reads).
+  // Refresh from chain on every new block.
   useEffect(() => {
     if (!blockNumber) return;
     setRefreshKey((k) => k + 1);
   }, [blockNumber]);
+
+  // Smooth tick for live pending-reward projection.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 200);
+    return () => clearInterval(id);
+  }, []);
 
   // Load globals + per-pool state from the chain's RPC (works irrespective of
   // which network the wallet is currently on).
@@ -78,12 +100,35 @@ const RitualFarmPage: React.FC = () => {
 
     (async () => {
       try {
-        const [totalAlloc, rpb] = await Promise.all([
+        const [totalAlloc, rpb, latestBlock] = await Promise.all([
           chefRead.totalAllocPoint(),
           chefRead.rewardPerBlock(),
+          rpc.getBlock('latest'),
         ]);
         if (cancelled) return;
-        setGlobals({ totalAllocPoint: totalAlloc, rewardPerBlock: rpb });
+        setGlobals((prev) => {
+          // Estimate block time from successive observations; default 1 s.
+          let blockTimeMs = prev?.blockTimeMs ?? 1000;
+          if (prev && latestBlock.number > prev.lastBlockNumber.toNumber()) {
+            const dn = latestBlock.number - prev.lastBlockNumber.toNumber();
+            const dt = Date.now() - prev.lastBlockTimestampMs;
+            if (dn > 0 && dt > 0) {
+              const sample = dt / dn;
+              // Light EMA so a single laggy refresh doesn't ruin the estimate.
+              blockTimeMs = Math.max(
+                100,
+                Math.min(10_000, prev.blockTimeMs * 0.7 + sample * 0.3),
+              );
+            }
+          }
+          return {
+            totalAllocPoint: totalAlloc,
+            rewardPerBlock: rpb,
+            lastBlockNumber: BigNumber.from(latestBlock.number),
+            lastBlockTimestampMs: Date.now(),
+            blockTimeMs,
+          };
+        });
       } catch {
         // chef may not be deployed yet on this network
       }
@@ -119,6 +164,9 @@ const RitualFarmPage: React.FC = () => {
             userBalance,
             allowance,
             decimals,
+            lastRewardBlock: info.lastRewardBlock ?? info[2],
+            accRewardPerShare: info.accRewardPerShare ?? info[3],
+            rewardDebt: user.rewardDebt ?? user[1],
           };
         } catch {
           // pool not on-chain yet; skip
@@ -132,8 +180,8 @@ const RitualFarmPage: React.FC = () => {
     };
   }, [chainId, chefAddress, pools, account, refreshKey]);
 
-  const handleApprove = async (pool: RitualFarmPool) => {
-    if (!chef || !chefAddress || !account) return;
+  const handleApprove = async (pool: RitualFarmPool): Promise<boolean> => {
+    if (!chef || !chefAddress || !account) return false;
     setBusyPid(pool.pid);
     setError(null);
     try {
@@ -146,15 +194,20 @@ const RitualFarmPage: React.FC = () => {
       const tx = await lp.approve(chefAddress, ethers.constants.MaxUint256);
       await tx.wait();
       refresh();
+      return true;
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      return false;
     } finally {
       setBusyPid(null);
     }
   };
 
-  const handleDeposit = async (pool: RitualFarmPool, amount: string) => {
-    if (!chef || !account || !amount) return;
+  const handleDeposit = async (
+    pool: RitualFarmPool,
+    amount: string,
+  ): Promise<boolean> => {
+    if (!chef || !account || !amount) return false;
     setBusyPid(pool.pid);
     setError(null);
     try {
@@ -163,15 +216,20 @@ const RitualFarmPage: React.FC = () => {
       const tx = await chef.deposit(pool.pid, value);
       await tx.wait();
       refresh();
+      return true;
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      return false;
     } finally {
       setBusyPid(null);
     }
   };
 
-  const handleWithdraw = async (pool: RitualFarmPool, amount: string) => {
-    if (!chef || !account || !amount) return;
+  const handleWithdraw = async (
+    pool: RitualFarmPool,
+    amount: string,
+  ): Promise<boolean> => {
+    if (!chef || !account || !amount) return false;
     setBusyPid(pool.pid);
     setError(null);
     try {
@@ -180,23 +238,27 @@ const RitualFarmPage: React.FC = () => {
       const tx = await chef.withdraw(pool.pid, value);
       await tx.wait();
       refresh();
+      return true;
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      return false;
     } finally {
       setBusyPid(null);
     }
   };
 
-  const handleHarvest = async (pool: RitualFarmPool) => {
-    if (!chef || !account) return;
+  const handleHarvest = async (pool: RitualFarmPool): Promise<boolean> => {
+    if (!chef || !account) return false;
     setBusyPid(pool.pid);
     setError(null);
     try {
       const tx = await chef.deposit(pool.pid, 0);
       await tx.wait();
       refresh();
+      return true;
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      return false;
     } finally {
       setBusyPid(null);
     }
@@ -239,11 +301,13 @@ const RitualFarmPage: React.FC = () => {
               : 0;
           const dailyAshForPool =
             allocShare > 0 ? (RITUAL_TOTAL_DAILY_ASH * allocShare) / 100 : 0;
+          const livePending = computeLivePending(st, globals);
           return (
             <PoolCard
               key={pool.pid}
               pool={pool}
               state={st}
+              livePending={livePending}
               allocSharePct={allocShare}
               dailyAsh={dailyAshForPool}
               account={account ?? null}
@@ -266,20 +330,22 @@ const RitualFarmPage: React.FC = () => {
 interface PoolCardProps {
   pool: RitualFarmPool;
   state?: PoolState;
+  livePending: BigNumber | undefined;
   allocSharePct: number;
   dailyAsh: number;
   account: string | null;
   busy: boolean;
   onConnect: () => void;
-  onApprove: () => void;
-  onDeposit: (amount: string) => void;
-  onWithdraw: (amount: string) => void;
-  onHarvest: () => void;
+  onApprove: () => Promise<boolean>;
+  onDeposit: (amount: string) => Promise<boolean>;
+  onWithdraw: (amount: string) => Promise<boolean>;
+  onHarvest: () => Promise<boolean>;
 }
 
 const PoolCard: React.FC<PoolCardProps> = ({
   pool,
   state,
+  livePending,
   allocSharePct,
   dailyAsh,
   account,
@@ -322,7 +388,10 @@ const PoolCard: React.FC<PoolCardProps> = ({
         <Stat label='Total staked' value={fmt(state?.totalStaked)} />
         <Stat label='Your stake' value={fmt(state?.userStaked)} />
         <Stat label='Wallet balance' value={fmt(state?.userBalance)} />
-        <Stat label='Pending ASH' value={fmtAsh(state?.pending)} />
+        <Stat
+          label='Pending ASH'
+          value={fmtAsh(livePending ?? state?.pending)}
+        />
       </Box>
 
       {!account ? (
@@ -355,7 +424,7 @@ const PoolCard: React.FC<PoolCardProps> = ({
               <Button
                 className='actionBtn'
                 disabled={busy}
-                onClick={onApprove}
+                onClick={() => onApprove()}
               >
                 {busy ? <CircularProgress size={18} /> : 'Approve'}
               </Button>
@@ -363,7 +432,10 @@ const PoolCard: React.FC<PoolCardProps> = ({
               <Button
                 className='actionBtn'
                 disabled={busy || depositBn.isZero()}
-                onClick={() => onDeposit(depositValue)}
+                onClick={async () => {
+                  const ok = await onDeposit(depositValue);
+                  if (ok) setDepositValue('');
+                }}
               >
                 {busy ? <CircularProgress size={18} /> : 'Deposit'}
               </Button>
@@ -391,14 +463,21 @@ const PoolCard: React.FC<PoolCardProps> = ({
             <Button
               className='secondaryBtn'
               disabled={busy || parseAmount(withdrawValue, decimals).isZero()}
-              onClick={() => onWithdraw(withdrawValue)}
+              onClick={async () => {
+                const ok = await onWithdraw(withdrawValue);
+                if (ok) setWithdrawValue('');
+              }}
             >
               {busy ? <CircularProgress size={18} /> : 'Withdraw'}
             </Button>
             <Button
               className='actionBtn'
-              disabled={busy || !state?.pending || state.pending.isZero()}
-              onClick={onHarvest}
+              disabled={
+                busy ||
+                !(livePending ?? state?.pending) ||
+                (livePending ?? state?.pending ?? ZERO).isZero()
+              }
+              onClick={() => onHarvest()}
             >
               {busy ? <CircularProgress size={18} /> : 'Harvest'}
             </Button>
@@ -415,6 +494,51 @@ const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
     <div className='statValue'>{value}</div>
   </Box>
 );
+
+/**
+ * Mirror MasterChef.pendingReward but with a virtual current block,
+ * interpolated from the wall clock since the last RPC sync. Lets us animate
+ * the pending counter smoothly between blocks without spamming the RPC.
+ */
+function computeLivePending(
+  st: PoolState | undefined,
+  globals: Globals | null,
+): BigNumber | undefined {
+  if (!st || !globals) return undefined;
+  if (globals.totalAllocPoint.isZero()) return st.pending;
+  if (st.userStaked.isZero()) return st.pending;
+
+  // Virtual current block = lastBlockNumber + elapsed / blockTime.
+  const elapsedMs = Math.max(0, Date.now() - globals.lastBlockTimestampMs);
+  const elapsedBlocks = Math.floor(elapsedMs / globals.blockTimeMs);
+  const virtualBlock = globals.lastBlockNumber.add(elapsedBlocks);
+
+  if (virtualBlock.lte(st.lastRewardBlock)) {
+    // No new blocks since last on-chain pool update.
+    return st.userStaked
+      .mul(st.accRewardPerShare)
+      .div(ACC_PRECISION)
+      .sub(st.rewardDebt);
+  }
+
+  if (st.totalStaked.isZero()) {
+    return st.pending;
+  }
+
+  const blocks = virtualBlock.sub(st.lastRewardBlock);
+  const reward = blocks
+    .mul(globals.rewardPerBlock)
+    .mul(st.allocPoint)
+    .div(globals.totalAllocPoint);
+  const accPerShare = st.accRewardPerShare.add(
+    reward.mul(ACC_PRECISION).div(st.totalStaked),
+  );
+  const pending = st.userStaked
+    .mul(accPerShare)
+    .div(ACC_PRECISION)
+    .sub(st.rewardDebt);
+  return pending.lt(0) ? ZERO : pending;
+}
 
 function parseAmount(v: string, decimals: number): BigNumber {
   if (!v) return BigNumber.from(0);
