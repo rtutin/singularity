@@ -2,6 +2,7 @@ import { Box, useMediaQuery, useTheme } from '@material-ui/core';
 import { HypeLabAds, SettingsModal } from 'components';
 import { useActiveWeb3React, useIsProMode } from 'hooks';
 import 'pages/styles/swap.scss';
+import './SwapPage.scss';
 import React, { useState, useEffect } from 'react';
 import { useIsV2 } from 'state/application/hooks';
 import { Field } from 'state/swap/actions';
@@ -94,22 +95,13 @@ const SwapPage: React.FC = () => {
           token2={isV2 ? token2 : token2V3}
         />
       ) : (
-        <>
-          <Box sx={{ maxWidth: '1536px', margin: '12px auto' }}>
-            <SwapDefaultMode
-              token1={isV2 ? token1 : token1V3}
-              token2={isV2 ? token2 : token2V3}
-            />
-          </Box>
-          <Box mb={1} sx={{ display: { xs: 'block', md: 'none' } }}>
-            <LiquidityHubAd />
-          </Box>
-        </>
+        <Box sx={{ maxWidth: '1536px', margin: '12px auto' }}>
+          <SwapDefaultMode
+            token1={isV2 ? token1 : token1V3}
+            token2={isV2 ? token2 : token2V3}
+          />
+        </Box>
       )}
-
-      <Box margin='24px auto'>
-        <HypeLabAds />
-      </Box>
     </Box>
   );
 };

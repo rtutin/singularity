@@ -518,6 +518,7 @@ export const WMATIC_EXTENDED: { [chainId: number]: TokenV3 } = {
   [ChainId.MINATO]: toV3Token(WETH[ChainId.MINATO]),
   [ChainId.SONEIUM]: toV3Token(WETH[ChainId.SONEIUM]),
   [ChainId.SOMNIA]: toV3Token(WETH[ChainId.SOMNIA]),
+  [ChainId.CYBERIA]: toV3Token(WETH[ChainId.CYBERIA]),
 };
 
 export const USDC: { [chainId: number]: Token } = {

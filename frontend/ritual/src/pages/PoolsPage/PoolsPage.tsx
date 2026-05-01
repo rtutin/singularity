@@ -56,8 +56,12 @@ const PoolsPage: React.FC = () => {
   useEffect(() => {
     if (!v2) {
       updateIsV2(false);
+    } else if (v2 && !v3) {
+      // V2-only chain (e.g. Cyberia): force v2 mode so we don't try to render
+      // the Algebra V3 supply form (which throws on Unsupported chain ID).
+      updateIsV2(true);
     }
-  }, [updateIsV2, v2]);
+  }, [updateIsV2, v2, v3]);
 
   useEffect(() => {
     if (!v3 && !v2 && v4) {
