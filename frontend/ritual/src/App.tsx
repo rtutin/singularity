@@ -13,6 +13,7 @@ import { OrderlyConfigProvider } from '@orderly.network/hooks';
 const PerpsPage = lazy(() => import('./pages/PerpsPage'));
 const DragonPage = lazy(() => import('./pages/DragonPage'));
 const FarmPage = lazy(() => import('./pages/FarmPage'));
+const RitualFarmPage = lazy(() => import('./pages/RitualFarmPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const PoolsPage = lazy(() => import('./pages/PoolsPage'));
 const SwapPage = lazy(() => import('./pages/SwapPage'));
@@ -254,6 +255,11 @@ const App: React.FC = () => {
                       </PageLayout>
                     </Route>
                     <Route exact path='/farm/:version?'>
+                      <PageLayout>
+                        <RitualFarmPage />
+                      </PageLayout>
+                    </Route>
+                    <Route exact path='/legacy-farm/:version?'>
                       <PageLayout>
                         <FarmPage />
                       </PageLayout>
