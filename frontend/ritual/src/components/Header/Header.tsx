@@ -5,7 +5,7 @@ import { Close } from '@material-ui/icons';
 import { useTheme } from '@material-ui/core/styles';
 import { useSwitchNetwork, useWalletInfo } from '@web3modal/ethers5/react';
 import { useActiveWeb3React, useConnectWallet } from 'hooks';
-import QuickIcon from 'assets/images/quickIcon.svg';
+import QuickIcon from 'assets/images/ash.png';
 import QuickLogo from 'assets/images/quickLogo.png';
 import QuickLogoWebP from 'assets/images/quickLogo.webp';
 import QuickPerpsLogo from 'assets/images/quickPerpsLogo.webp';
@@ -369,7 +369,7 @@ const Header: React.FC<{ onUpdateNewsletter: (val: boolean) => void }> = ({
         <Box style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <Link to='/'>
             {mobileWindowSize && (
-              <img src={QuickIcon} alt='Ritual' height={32} />
+              <img src={QuickIcon} alt='Ritual' height={32} width={32} />
             )}
             {!mobileWindowSize && (
               <Box
@@ -380,7 +380,7 @@ const Header: React.FC<{ onUpdateNewsletter: (val: boolean) => void }> = ({
                   textDecoration: 'none',
                 }}
               >
-                <img src={QuickIcon} alt='Ritual' height={32} />
+                <img src={QuickIcon} alt='Ritual' height={32} width={32} />
                 <span
                   style={{
                     fontSize: 22,
