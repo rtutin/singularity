@@ -130,11 +130,17 @@ services:
       sh -lc "if [ ! -f vendor/autoload.php ]; then
         composer install --no-interaction --prefer-dist --no-progress;
       fi &&
+      if [ ! -f public/build/manifest.json ]; then
+        npm install && npm run build;
+      fi &&
       php artisan serve --host=0.0.0.0 --port=9001"
     ports:
       - "9001:9001"
     env_file:
       - /root/singularity/backend/laravel/.env
+    environment:
+      APP_URL: https://bridge.cyberia.church
+      ASSET_URL: https://bridge.cyberia.church
 
   polygon-edge:
     image: 0xpolygon/polygon-edge:latest
