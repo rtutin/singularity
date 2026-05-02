@@ -10,13 +10,17 @@ import { createWalletClient, createPublicClient, http, parseAbi, getContract } f
 import { privateKeyToAccount } from "viem/accounts";
 import { mainnet } from "viem/chains";
 
-const DEPLOYER_PK = process.env.DEPLOYER_PK;
-if (!DEPLOYER_PK) { console.error("DEPLOYER_PK not set"); process.exit(1); }
+const RELAYER_PK = process.env.BRIDGE_RELAYER_PRIVATE_KEY || process.env.DEPLOYER_PK;
+if (!RELAYER_PK) {
+  console.error("BRIDGE_RELAYER_PRIVATE_KEY or DEPLOYER_PK not set");
+  process.exit(1);
+}
 
-const pk = (DEPLOYER_PK.startsWith("0x") ? DEPLOYER_PK : `0x${DEPLOYER_PK}`) as `0x${string}`;
+const pk = (RELAYER_PK.startsWith("0x") ? RELAYER_PK : `0x${RELAYER_PK}`) as `0x${string}`;
 const account = privateKeyToAccount(pk);
 
-const BRIDGE_ADDRESS = "0x0065AA95709ABB09dA8293F469FA9713f79544Eb" as const;
+const configuredBridgeAddress = process.env.BRIDGE_EVM_CONTRACT_ADDRESS || "0x0065AA95709ABB09dA8293F469FA9713f79544Eb";
+const BRIDGE_ADDRESS = configuredBridgeAddress as `0x${string}`;
 
 const RPC_URL = process.env.CYBERIA_RPC_URL || "http://polygon-edge:8545";
 
@@ -39,6 +43,7 @@ const publicClient = createPublicClient({
 });
 
 const bridgeAbi = parseAbi([
+  "function owner() view returns (address)",
   "function releaseCyberSol(address to, uint256 amount, uint64 nonce)",
   "function unlockCyber(address to, uint256 amount, uint64 nonce)",
 ]);
@@ -57,6 +62,16 @@ async function main() {
   console.log(`Relay: ${direction} -> ${recipient}, amount=${amount}, nonce=${nonce}`);
 
   if (direction === "sol_to_evm") {
+    const owner = await publicClient.readContract({
+      address: BRIDGE_ADDRESS,
+      abi: bridgeAbi,
+      functionName: "owner",
+    });
+
+    if (owner.toLowerCase() !== account.address.toLowerCase()) {
+      throw new Error(`Bridge relayer ${account.address} is not contract owner ${owner} for ${BRIDGE_ADDRESS}`);
+    }
+
     // Mint CYBER.sol on EVM for the recipient
     const hash = await walletClient.writeContract({
       address: BRIDGE_ADDRESS,
