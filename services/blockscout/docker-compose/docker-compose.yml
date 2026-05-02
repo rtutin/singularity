@@ -133,6 +133,12 @@ services:
       if [ ! -f public/build/manifest.json ]; then
         npm install && npm run build;
       fi &&
+      if [ ! -d /singularity/crypto/hardhat/node_modules/dotenv ]; then
+        npm ci --prefix /singularity/crypto/hardhat;
+      fi &&
+      if [ ! -d /singularity/crypto/anchor/node_modules/@coral-xyz ]; then
+        npm ci --prefix /singularity/crypto/anchor;
+      fi &&
       php artisan serve --host=0.0.0.0 --port=9001"
     ports:
       - "9001:9001"
