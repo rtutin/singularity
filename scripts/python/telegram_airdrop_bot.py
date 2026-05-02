@@ -58,7 +58,6 @@ FACTORY_ABI = [
         "inputs": [
             {"name": "name_", "type": "string"},
             {"name": "symbol_", "type": "string"},
-            {"name": "chatId", "type": "int64"},
             {"name": "tokenOwner", "type": "address"},
         ],
         "name": "createToken",
@@ -67,16 +66,8 @@ FACTORY_ABI = [
         "type": "function",
     },
     {
-        "inputs": [{"name": "", "type": "int64"}],
-        "name": "tokenOfChat",
-        "outputs": [{"name": "", "type": "address"}],
-        "stateMutability": "view",
-        "type": "function",
-    },
-    {
         "anonymous": False,
         "inputs": [
-            {"indexed": True, "name": "chatId", "type": "int64"},
             {"indexed": True, "name": "token", "type": "address"},
             {"indexed": True, "name": "owner", "type": "address"},
             {"indexed": False, "name": "name", "type": "string"},
@@ -86,8 +77,6 @@ FACTORY_ABI = [
         "type": "event",
     },
 ]
-
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 MIN_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MIN_REWARDS_INTERVAL_SECONDS", "60"))
 MAX_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MAX_REWARDS_INTERVAL_SECONDS", str(30 * 24 * 3600)))
@@ -403,15 +392,6 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    existing = get_chat_token(chat.id)
-    if existing is not None:
-        await update.message.reply_text(
-            f"This chat already has a token: {existing[1]} ({existing[2]})\n"
-            f"Address: {existing[3] or 'pending'}\n"
-            f"Interval: {format_interval(existing[4])}"
-        )
-        return
-
     if not TELEGRAM_TOKEN_FACTORY or not DEPLOYER_PK:
         await update.message.reply_text(
             "Token creation is not configured on this bot "
@@ -430,6 +410,14 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
                         (chat_id, name, symbol, rewards_interval, created_by)
                     VALUES
                         (:chat_id, :name, :symbol, :interval, :user_id)
+                    ON CONFLICT(chat_id) DO UPDATE SET
+                        name = excluded.name,
+                        symbol = excluded.symbol,
+                        token_address = NULL,
+                        rewards_interval = excluded.rewards_interval,
+                        created_by = excluded.created_by,
+                        created_at = datetime('now'),
+                        last_payout_at = NULL
                 """),
                 {
                     "chat_id": chat.id,
@@ -460,86 +448,53 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
             abi=FACTORY_ABI,
         )
 
-        existing_token = factory.functions.tokenOfChat(int(chat.id)).call()
-        if existing_token and existing_token.lower() != ZERO_ADDRESS:
-            token_address = Web3.to_checksum_address(existing_token)
-            logger.info(
-                "Chat %s already has on-chain token %s; syncing local DB",
-                chat.id,
-                token_address,
-            )
-        else:
-            nonce = w3.eth.get_transaction_count(acct.address, "pending")
-            try:
-                estimated = factory.functions.createToken(
-                    name, symbol, int(chat.id), acct.address
-                ).estimate_gas({"from": acct.address})
-            except Exception as est_err:
-                logger.warning(f"estimate_gas failed, falling back to 5_000_000: {est_err}")
-                estimated = 5_000_000
-            gas_limit = int(estimated * 1.25) + 50_000
-            tx = factory.functions.createToken(
-                name, symbol, int(chat.id), acct.address
-            ).build_transaction({
-                "from": acct.address,
-                "nonce": nonce,
-                "gas": gas_limit,
-                "gasPrice": w3.eth.gas_price,
-                "chainId": CHAIN_ID,
-            })
-            signed = acct.sign_transaction(tx)
-            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        try:
+            estimated = factory.functions.createToken(
+                name, symbol, acct.address
+            ).estimate_gas({"from": acct.address})
+        except Exception as est_err:
+            logger.warning(f"estimate_gas failed, falling back to 5_000_000: {est_err}")
+            estimated = 5_000_000
+        gas_limit = int(estimated * 1.25) + 50_000
+        tx = factory.functions.createToken(
+            name, symbol, acct.address
+        ).build_transaction({
+            "from": acct.address,
+            "nonce": nonce,
+            "gas": gas_limit,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        })
+        signed = acct.sign_transaction(tx)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
 
-            if receipt.status != 1:
-                raise RuntimeError(f"tx reverted: {tx_hash.hex()}")
+        if receipt.status != 1:
+            raise RuntimeError(f"tx reverted: {tx_hash.hex()}")
 
-            # Try to pull token address from event; fall back to view call.
-            try:
-                events = factory.events.TokenCreated().process_receipt(receipt)
-                if events:
-                    token_address = events[0]["args"]["token"]
-            except Exception:
-                token_address = None
+        # Try to pull token address from event; fall back to view call.
+        try:
+            events = factory.events.TokenCreated().process_receipt(receipt)
+            if events:
+                token_address = events[0]["args"]["token"]
+        except Exception:
+            token_address = None
 
         if not token_address:
-            token_address = factory.functions.tokenOfChat(int(chat.id)).call()
+            raise RuntimeError("TokenCreated event did not include token address")
 
         token_address = Web3.to_checksum_address(token_address)
     except Exception as e:
-        if "token already exists" in str(e) and "factory" in locals():
-            try:
-                existing_token = factory.functions.tokenOfChat(int(chat.id)).call()
-                if existing_token and existing_token.lower() != ZERO_ADDRESS:
-                    token_address = Web3.to_checksum_address(existing_token)
-                    logger.info(
-                        "Recovered existing on-chain token for chat %s: %s",
-                        chat.id,
-                        token_address,
-                    )
-                else:
-                    token_address = None
-            except Exception as recover_err:
-                logger.error(
-                    "Failed to recover existing token for chat %s: %s",
-                    chat.id,
-                    recover_err,
-                )
-
-        if token_address:
-            await status_msg.edit_text(
-                f"This chat already has an on-chain token. Synced address: {token_address}"
+        logger.error(f"On-chain createToken failed for chat {chat.id}: {e}")
+        # Roll back the DB row so the user can retry.
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM chat_tokens WHERE chat_id = :c AND token_address IS NULL"),
+                {"c": chat.id},
             )
-        else:
-            logger.error(f"On-chain createToken failed for chat {chat.id}: {e}")
-            # Roll back the DB row so the user can retry.
-            with engine.begin() as conn:
-                conn.execute(
-                    text("DELETE FROM chat_tokens WHERE chat_id = :c AND token_address IS NULL"),
-                    {"c": chat.id},
-                )
-            await status_msg.edit_text(f"On-chain deployment failed: {e}")
-            return
+        await status_msg.edit_text(f"On-chain deployment failed: {e}")
+        return
 
     with engine.begin() as conn:
         conn.execute(
