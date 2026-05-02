@@ -9,7 +9,7 @@ services:
     volumes:
       - "../proxy:/etc/nginx/templates"
       - "/root/singularity/frontend/landing:/usr/share/nginx/landing:ro"
-      - "/root/singularity/frontend/ritual/build:/usr/share/nginx/dex:ro"
+      - "/root/dex-frontend:/usr/share/nginx/dex:ro"
       - "/root/certbot/conf:/etc/letsencrypt:ro"
       - "/root/certbot/www:/var/www/certbot:ro"
     environment:
