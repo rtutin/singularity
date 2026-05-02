@@ -214,6 +214,8 @@ class BridgeService
                     'CYBERIA_RPC_URL' => Environment::isProduction()
                         ? 'http://polygon-edge:8545'
                         : 'http://195.166.164.94:8545',
+                    'BRIDGE_EVM_CONTRACT_ADDRESS' => config('services.bridge.evm_bridge_address'),
+                    'BRIDGE_RELAYER_PRIVATE_KEY' => config('services.bridge.relayer_private_key'),
                 ])
                 ->timeout(120)
                 ->run([
