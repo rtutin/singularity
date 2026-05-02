@@ -302,7 +302,7 @@ class BridgeService
                 ])
                 ->timeout(120)
                 ->run([
-                    'npx', 'tsx', 'scripts/relay-release-native.ts',
+                    'npx', 'ts-node', '--transpile-only', 'scripts/relay-release-native.ts',
                     $request->recipient_address,
                     $amountRaw,
                 ]);
