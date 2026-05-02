@@ -34,7 +34,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/cyberia.church/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/cyberia.church/privkey.pem;
 
-    root /usr/share/nginx/html/landing;
+    root /usr/share/nginx/landing;
     index index.html;
 
     location / {
