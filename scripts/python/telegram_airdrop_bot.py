@@ -14,6 +14,7 @@ from telegram.error import TelegramError
 from telegram.request import HTTPXRequest
 
 from sqlalchemy import create_engine, text
+from web3 import Web3
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -77,6 +78,8 @@ FACTORY_ABI = [
         "type": "event",
     },
 ]
+
+TOKEN_CREATED_TOPIC = Web3.keccak(text="TokenCreated(address,address,string,string)").hex()
 
 MIN_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MIN_REWARDS_INTERVAL_SECONDS", "60"))
 MAX_REWARDS_INTERVAL_SECONDS = int(os.environ.get("MAX_REWARDS_INTERVAL_SECONDS", str(30 * 24 * 3600)))
@@ -268,6 +271,19 @@ async def is_chat_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
         return False
 
 
+async def is_chat_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None:
+        return False
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        return member.status == "creator"
+    except TelegramError as e:
+        logger.warning(f"get_chat_member failed for chat {chat.id} user {user.id}: {e}")
+        return False
+
+
 def get_chat_token(chat_id: int):
     with engine.connect() as conn:
         row = conn.execute(
@@ -349,7 +365,7 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
     """
     /create_token <name> <rewards_interval>
     Creates a per-chat ERC20Votes reward token via the on-chain factory and
-    wires it to this chat. Only chat admins can run it; must be used from the
+    wires it to this chat. Only the chat owner can run it; must be used from the
     target group/supergroup.
     """
     chat = update.effective_chat
@@ -363,8 +379,14 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if not await is_chat_admin(update, context):
-        await update.message.reply_text("Only chat admins can create a token.")
+    if not await is_chat_owner(update, context):
+        await update.message.reply_text("Only the chat owner can create a token.")
+        logger.warning(
+            "Unauthorized create_token attempt by non-owner user_id=%s username=%s chat_id=%s",
+            user.id,
+            user.username,
+            chat.id,
+        )
         return
 
     args = context.args or []
@@ -473,13 +495,19 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         if receipt.status != 1:
             raise RuntimeError(f"tx reverted: {tx_hash.hex()}")
 
-        # Try to pull token address from event; fall back to view call.
-        try:
-            events = factory.events.TokenCreated().process_receipt(receipt)
-            if events:
-                token_address = events[0]["args"]["token"]
-        except Exception:
-            token_address = None
+        # Only decode factory logs; child token constructor emits its own logs too.
+        for log in receipt.logs:
+            topics = log.get("topics") or []
+            if not topics:
+                continue
+            if log.get("address", "").lower() != factory.address.lower():
+                continue
+            if topics[0].hex().lower() != TOKEN_CREATED_TOPIC.lower():
+                continue
+
+            event = factory.events.TokenCreated().process_log(log)
+            token_address = event["args"]["token"]
+            break
 
         if not token_address:
             raise RuntimeError("TokenCreated event did not include token address")
@@ -503,12 +531,11 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     await status_msg.edit_text(
-        "Token created!\n"
+        "New token created.\n"
         f"Name: {name}\n"
         f"Symbol: {symbol}\n"
         f"Address: {token_address}\n"
-        f"Rewards interval: {format_interval(rewards_interval)}\n\n"
-        "Members: run /set_wallet <address> here to join the airdrop."
+        f"Rewards interval: {format_interval(rewards_interval)}"
     )
 
 
