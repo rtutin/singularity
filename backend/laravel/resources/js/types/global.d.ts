@@ -1,6 +1,23 @@
 import type { Auth } from '@/types/auth';
 import type { Team } from '@/types/teams';
 
+type EthereumProvider = {
+    isMetaMask?: boolean;
+    request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+    on: (event: string, listener: (...args: unknown[]) => void) => void;
+    removeListener: (
+        event: string,
+        listener: (...args: unknown[]) => void,
+    ) => void;
+    removeAllListeners?: (event: string) => void;
+};
+
+declare global {
+    interface Window {
+        ethereum?: EthereumProvider;
+    }
+}
+
 // Extend ImportMeta interface for Vite...
 declare module 'vite/client' {
     interface ImportMetaEnv {

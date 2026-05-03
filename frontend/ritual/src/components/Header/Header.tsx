@@ -27,6 +27,33 @@ import { OrderlyPoints } from './OrderlyPoints';
 import { shortenAddress, useIsSupportedNetwork } from 'utils';
 import AccountDetailsModal from 'components/AccountDetails/AccountDetailsModal';
 
+const cyberiaExternalLinks: HeaderMenuItem[] = [
+  {
+    link: '/cyberia',
+    text: 'Cyberia',
+    id: 'cyberia-site-link',
+    isExternal: true,
+    target: '_blank',
+    externalLink: 'https://cyberia.church',
+  },
+  {
+    link: '/cyberia-bridge',
+    text: 'Bridge',
+    id: 'cyberia-bridge-link',
+    isExternal: true,
+    target: '_blank',
+    externalLink: 'https://bridge.cyberia.church',
+  },
+  {
+    link: '/cyberia-explorer',
+    text: 'Explorer',
+    id: 'cyberia-explorer-link',
+    isExternal: true,
+    target: '_blank',
+    externalLink: 'https://explorer.cyberia.church',
+  },
+];
+
 const Header: React.FC<{ onUpdateNewsletter: (val: boolean) => void }> = ({
   onUpdateNewsletter,
 }) => {
@@ -328,6 +355,8 @@ const Header: React.FC<{ onUpdateNewsletter: (val: boolean) => void }> = ({
     });
   }
 
+  menuItems.push(...cyberiaExternalLinks);
+
   const parsedQuery = useParsedQueryString();
   const parsedChain =
     parsedQuery && parsedQuery.chainId
@@ -386,7 +415,7 @@ const Header: React.FC<{ onUpdateNewsletter: (val: boolean) => void }> = ({
                     fontSize: 22,
                     fontWeight: 700,
                     color: '#fff',
-                    letterSpacing: '0.04em'
+                    letterSpacing: '0.04em',
                   }}
                 >
                   Ritual

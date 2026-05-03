@@ -78,6 +78,36 @@
     letter-spacing: 0.5px;
   }
 
+  .masthead-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .masthead-links {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .masthead-links a,
+  .colophon a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .masthead-links a:hover,
+  .colophon a:hover {
+    color: var(--accent-soft);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   .masthead-sub {
     padding: 8px 0 40px;
     border-bottom: 3px double var(--ink);
@@ -456,6 +486,11 @@
 
   @media (max-width: 680px) {
     .page { padding: 40px 24px 80px; }
+    .masthead { grid-template-columns: 1fr; gap: 14px; }
+    .masthead-actions { align-items: flex-start; }
+    .masthead-sub { grid-template-columns: 1fr; gap: 6px; }
+    .masthead-sub span:nth-child(2),
+    .masthead-sub span:nth-child(3) { text-align: left; }
     .triad { grid-template-columns: 1fr; }
     .triad-col { border-right: none; border-bottom: 1px solid var(--rule); padding: 24px 0; }
     .triad-col:last-child { border-bottom: none; }
@@ -473,7 +508,14 @@
   <!-- MASTHEAD -->
   <div class="masthead">
     <div class="masthead-title">Cyberia — A Thesis</div>
-    <div class="masthead-meta">Document 01 / 06</div>
+    <div class="masthead-actions">
+      <div class="masthead-meta">Document 01 / 06</div>
+      <nav class="masthead-links" aria-label="Cyberia links">
+        <a href="https://cyberia.church" target="_blank" rel="noopener noreferrer">Cyberia</a>
+        <a href="https://swap.cyberia.church" target="_blank" rel="noopener noreferrer">Swap</a>
+        <a href="https://explorer.cyberia.church" target="_blank" rel="noopener noreferrer">Explorer</a>
+      </nav>
+    </div>
   </div>
   <div class="masthead-sub">
     <span>Positioning Foundation</span>
@@ -656,8 +698,10 @@
     </div>
     <div class="colophon-right">
       <strong>VERIFY</strong><br>
-      github.com/cyberia-temple/singularity<br>
-      cyberia-temple.github.io<br>
+      <a href="https://github.com/cyberia-temple/singularity" target="_blank" rel="noopener noreferrer">github.com/cyberia-temple/singularity</a><br>
+      <a href="https://cyberia.church" target="_blank" rel="noopener noreferrer">cyberia.church</a><br>
+      <a href="https://swap.cyberia.church" target="_blank" rel="noopener noreferrer">swap.cyberia.church</a><br>
+      <a href="https://explorer.cyberia.church" target="_blank" rel="noopener noreferrer">explorer.cyberia.church</a><br>
       Chain ID 49406 · GPL-3.0<br>
       <br>
       <em style="font-style: italic; font-family: var(--serif); color: var(--ink-soft);">"Built in the open. Settled on-chain."</em>
