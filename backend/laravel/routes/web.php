@@ -15,6 +15,11 @@ use App\Http\Middleware\EnsureTeamMembership;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [ApiController::class, 'index'])->name('home');
+Route::inertia('/market', 'Market')->name('market');
+Route::inertia('/lending', 'Lending')->name('lending');
+Route::get('dao', [DaoController::class, 'index'])->name('dao.index');
+Route::get('dao/{dao}', [DaoController::class, 'show'])->name('dao.show');
+Route::get('proposals/{proposal}', [ProposalController::class, 'show'])->name('proposals.show');
 
 Route::post('login/web3', Web3LoginController::class)->name('web3.login');
 
@@ -35,13 +40,12 @@ Route::middleware(['auth'])->group(function () {
         'destroy' => 'links.destroy',
     ]);
     Route::resource('categories', CategoryController::class)->except(['show', 'create', 'edit']);
-    Route::resource('dao', DaoController::class)->except(['create', 'edit']);
+    Route::resource('dao', DaoController::class)->only(['store', 'update', 'destroy']);
 
     // Proposals (nested under dao)
     Route::post('dao/{dao}/proposals', [ProposalController::class, 'store'])->name('dao.proposals.store');
 
     // Proposal detail
-    Route::get('proposals/{proposal}', [ProposalController::class, 'show'])->name('proposals.show');
     Route::put('proposals/{proposal}', [ProposalController::class, 'update'])->name('proposals.update');
     Route::delete('proposals/{proposal}', [ProposalController::class, 'destroy'])->name('proposals.destroy');
 

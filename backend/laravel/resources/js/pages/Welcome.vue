@@ -539,6 +539,24 @@ const statusColor = (status: string) => {
                         explorer.cyberia.church
                         <ExternalLink class="h-3 w-3" />
                     </a>
+                    <Link
+                        href="/market"
+                        class="inline-flex items-center gap-1 text-[#1b1b18] hover:text-[#706f6c] dark:text-[#EDEDEC] dark:hover:text-[#A1A09A]"
+                    >
+                        NFT Market
+                    </Link>
+                    <Link
+                        href="/lending"
+                        class="inline-flex items-center gap-1 text-[#1b1b18] hover:text-[#706f6c] dark:text-[#EDEDEC] dark:hover:text-[#A1A09A]"
+                    >
+                        Lending
+                    </Link>
+                    <Link
+                        href="/dao"
+                        class="inline-flex items-center gap-1 text-[#1b1b18] hover:text-[#706f6c] dark:text-[#EDEDEC] dark:hover:text-[#A1A09A]"
+                    >
+                        DAO
+                    </Link>
                 </div>
                 <div
                     class="flex flex-wrap items-center justify-center gap-3 sm:justify-end"
