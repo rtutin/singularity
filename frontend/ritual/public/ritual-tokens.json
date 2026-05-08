@@ -29,6 +29,14 @@
       "decimals": 18,
       "chainId": 49406,
       "logoURI": "/logo_circle.png"
+    },
+    {
+      "name": "Telegram",
+      "address": "0x3d32FE83ad0C1157fdDCA0a3280764c495cdAD6D",
+      "symbol": "TG",
+      "decimals": 18,
+      "chainId": 49406,
+      "logoURI": "/logo_circle.png"
     }
   ]
 }
