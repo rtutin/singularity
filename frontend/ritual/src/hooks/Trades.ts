@@ -11,10 +11,22 @@ import { wrappedCurrency } from '../utils/wrappedCurrency';
 
 import { useActiveWeb3React } from './index';
 
+interface V2TradeResult {
+  trade: Trade | null;
+  loading: boolean;
+}
+
 export function useAllCommonPairs(
   currencyA?: Currency,
   currencyB?: Currency,
 ): Pair[] {
+  return useAllCommonPairsState(currencyA, currencyB).pairs;
+}
+
+function useAllCommonPairsState(
+  currencyA?: Currency,
+  currencyB?: Currency,
+): { pairs: Pair[]; loading: boolean } {
   const { chainId } = useActiveWeb3React();
 
   const bases: Token[] = useMemo(
@@ -82,24 +94,24 @@ export function useAllCommonPairs(
 
   const allPairs = usePairs(allPairCombinations);
 
-  // only pass along valid pairs, non-duplicated pairs
-  return useMemo(
-    () =>
-      Object.values(
-        allPairs
-          // filter out invalid pairs
-          .filter((result): result is [PairState.EXISTS, Pair] =>
-            Boolean(result[0] === PairState.EXISTS && result[1]),
-          )
-          // filter out duplicated pairs
-          .reduce<{ [pairAddress: string]: Pair }>((memo, [, curr]) => {
-            memo[curr.liquidityToken.address] =
-              memo[curr.liquidityToken.address] ?? curr;
-            return memo;
-          }, {}),
-      ),
-    [allPairs],
-  );
+  return useMemo(() => {
+    const loading = allPairs.some(([state]) => state === PairState.LOADING);
+    const pairs = Object.values(
+      allPairs
+        // filter out invalid pairs
+        .filter((result): result is [PairState.EXISTS, Pair] =>
+          Boolean(result[0] === PairState.EXISTS && result[1]),
+        )
+        // filter out duplicated pairs
+        .reduce<{ [pairAddress: string]: Pair }>((memo, [, curr]) => {
+          memo[curr.liquidityToken.address] =
+            memo[curr.liquidityToken.address] ?? curr;
+          return memo;
+        }, {}),
+    );
+
+    return { pairs, loading };
+  }, [allPairs]);
 }
 
 /**
@@ -112,8 +124,8 @@ export function useTradeExactIn(
   currencyOut?: Currency,
   swapDelay?: SwapDelay,
   onSetSwapDelay?: (swapDelay: SwapDelay) => void,
-): Trade | null {
-  const allowedPairs = useAllCommonPairs(
+): V2TradeResult {
+  const { pairs: allowedPairs, loading } = useAllCommonPairsState(
     currencyAmountIn?.currency,
     currencyOut,
   );
@@ -156,7 +168,10 @@ export function useTradeExactIn(
     swapDelay,
   ]);
 
-  return bestTradeExactIn;
+  return {
+    trade: bestTradeExactIn,
+    loading: Boolean(currencyAmountIn && currencyOut && loading),
+  };
 }
 
 /**
@@ -168,8 +183,8 @@ export function useTradeExactOut(
   currencyAmountOut?: CurrencyAmount,
   swapDelay?: SwapDelay,
   onSetSwapDelay?: (swapDelay: SwapDelay) => void,
-): Trade | null {
-  const allowedPairs = useAllCommonPairs(
+): V2TradeResult {
+  const { pairs: allowedPairs, loading } = useAllCommonPairsState(
     currencyIn,
     currencyAmountOut?.currency,
   );
@@ -211,5 +226,8 @@ export function useTradeExactOut(
     swapDelay,
   ]);
 
-  return bestTradeExactOut;
+  return {
+    trade: bestTradeExactOut,
+    loading: Boolean(currencyIn && currencyAmountOut && loading),
+  };
 }
