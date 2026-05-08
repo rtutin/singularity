@@ -20,7 +20,7 @@
       "symbol": "WCYBER",
       "decimals": 18,
       "chainId": 49406,
-      "logoURI": "/cyberia.png"
+      "logoURI": "/CYBER.png"
     },
     {
       "name": "Ash",
@@ -44,7 +44,7 @@
       "symbol": "CYBER.sol",
       "decimals": 18,
       "chainId": 49406,
-      "logoURI": "/cyberia.png"
+      "logoURI": "/CYBER.png"
     }
   ]
 }
