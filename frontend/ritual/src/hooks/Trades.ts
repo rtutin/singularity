@@ -4,7 +4,7 @@ import {
   V2_CUSTOM_BASES,
 } from 'constants/v3/addresses';
 import flatMap from 'lodash.flatmap';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { SwapDelay } from 'state/swap/actions';
 import { PairState, usePairs } from '../data/Reserves';
 import { wrappedCurrency } from '../utils/wrappedCurrency';
@@ -127,19 +127,34 @@ export function useTradeExactIn(
     ) {
       return bestTradeExactIn;
     }
-    if (swapDelay !== SwapDelay.SWAP_REFRESH && onSetSwapDelay) {
-      onSetSwapDelay(SwapDelay.SWAP_COMPLETE);
-    }
     if (currencyAmountIn && currencyOut && allowedPairs.length > 0) {
-      return (
+      const trade =
         Trade.bestTradeExactIn(allowedPairs, currencyAmountIn, currencyOut, {
           maxHops: 3,
           maxNumResults: 1,
-        })[0] ?? null
-      );
+        })[0] ?? null;
+      return trade;
     }
     return null;
-  }, [allowedPairs, currencyAmountIn, currencyOut, onSetSwapDelay, swapDelay]);
+  }, [allowedPairs, currencyAmountIn, currencyOut, swapDelay]);
+
+  useEffect(() => {
+    if (
+      swapDelay === SwapDelay.USER_INPUT_COMPLETE &&
+      onSetSwapDelay &&
+      currencyAmountIn &&
+      currencyOut &&
+      allowedPairs.length > 0
+    ) {
+      onSetSwapDelay(SwapDelay.SWAP_COMPLETE);
+    }
+  }, [
+    allowedPairs.length,
+    currencyAmountIn,
+    currencyOut,
+    onSetSwapDelay,
+    swapDelay,
+  ]);
 
   return bestTradeExactIn;
 }
@@ -167,19 +182,34 @@ export function useTradeExactOut(
     ) {
       return bestTradeExactOut;
     }
-    if (swapDelay !== SwapDelay.SWAP_REFRESH && onSetSwapDelay) {
-      onSetSwapDelay(SwapDelay.SWAP_COMPLETE);
-    }
     if (currencyIn && currencyAmountOut && allowedPairs.length > 0) {
-      return (
+      const trade =
         Trade.bestTradeExactOut(allowedPairs, currencyIn, currencyAmountOut, {
           maxHops: 3,
           maxNumResults: 1,
-        })[0] ?? null
-      );
+        })[0] ?? null;
+      return trade;
     }
     return null;
-  }, [allowedPairs, currencyIn, currencyAmountOut, onSetSwapDelay, swapDelay]);
+  }, [allowedPairs, currencyIn, currencyAmountOut, swapDelay]);
+
+  useEffect(() => {
+    if (
+      swapDelay === SwapDelay.USER_INPUT_COMPLETE &&
+      onSetSwapDelay &&
+      currencyIn &&
+      currencyAmountOut &&
+      allowedPairs.length > 0
+    ) {
+      onSetSwapDelay(SwapDelay.SWAP_COMPLETE);
+    }
+  }, [
+    allowedPairs.length,
+    currencyIn,
+    currencyAmountOut,
+    onSetSwapDelay,
+    swapDelay,
+  ]);
 
   return bestTradeExactOut;
 }

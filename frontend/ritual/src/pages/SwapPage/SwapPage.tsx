@@ -34,6 +34,7 @@ const SwapPage: React.FC = () => {
 
   const config = getConfig(chainId);
   const showSwap = config['swap']['available'];
+  const leaderboardAvailable = Boolean(config?.leaderboard?.available);
 
   if (!showSwap) {
     location.href = '/';
@@ -46,7 +47,7 @@ const SwapPage: React.FC = () => {
   }, [showSwap]);
 
   const getPairId = async () => {
-    if (token1 && token2) {
+    if (leaderboardAvailable && token1 && token2) {
       const res = await fetch(
         `${process.env.REACT_APP_LEADERBOARD_APP_URL}/utils/pair-address/${token1.address}/${token2.address}?chainId=${chainId}`,
       );
@@ -74,6 +75,7 @@ const SwapPage: React.FC = () => {
   const { data } = useQuery({
     queryKey: ['fetchPairId', token1?.address, token2?.address, chainId],
     queryFn: getPairId,
+    enabled: leaderboardAvailable,
   });
 
   return (

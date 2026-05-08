@@ -111,7 +111,7 @@ const useFetchEthereumPrice = (address?: string) => {
 
   return useQuery({
     queryKey: ['useFetchEthereumPrice', address, chainId],
-    queryFn: () => fetchEthereumPrice(address!),
+    queryFn: () => (address ? fetchEthereumPrice(address) : null),
     enabled: !!address && chainId === ChainId.ETHEREUM,
   });
 };
@@ -125,6 +125,8 @@ const getUSDPricesFromAddresses = async (
   let pricesV3: any[] = [],
     pricesV2: any[] = [];
   const config = getConfig(chainId);
+  if (!config?.leaderboard?.available) return [];
+
   const v2 = config['v2'] && !onlyV3;
   const addresses = addressStr.split('_');
 

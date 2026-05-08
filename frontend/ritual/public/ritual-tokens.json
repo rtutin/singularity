@@ -36,7 +36,15 @@
       "symbol": "TG",
       "decimals": 18,
       "chainId": 49406,
-      "logoURI": "/logo_circle.png"
+      "logoURI": "/telegram.svg"
+    },
+    {
+      "name": "CYBER.sol",
+      "address": "0x7DcDa19Cf984ca708E5fA228AC148e7d82D508BA",
+      "symbol": "CYBER.sol",
+      "decimals": 18,
+      "chainId": 49406,
+      "logoURI": "/cyberia.png"
     }
   ]
 }

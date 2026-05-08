@@ -7,7 +7,6 @@ import {
 } from '@material-ui/core';
 import { Provider } from 'react-redux';
 import store from 'state';
-import GoogleAnalyticsReporter from './components/GoogleAnalytics/GoogleAnalyticsReporter';
 import { OrderlyConfigProvider } from '@orderly.network/hooks';
 
 const PerpsPage = lazy(() => import('./pages/PerpsPage'));
@@ -87,7 +86,8 @@ const projectId = process.env.REACT_APP_WALLETCONNECT_PROJECT_ID ?? '';
 
 const metadata = {
   name: 'Ritual',
-  description: 'The sacrificial DEX on Cyberia. Every swap burns an offering — out of the fire rises Ash.',
+  description:
+    'The sacrificial DEX on Cyberia. Every swap burns an offering — out of the fire rises Ash.',
   url: 'https://ritual.cyberia.church',
   icons: ['/logo_circle.png'],
 };
@@ -176,7 +176,6 @@ const App: React.FC = () => {
       >
         <QueryClientProvider client={queryClient}>
           <OrderlyConfigProvider brokerId='quick_perps' networkId='mainnet'>
-            <Route component={GoogleAnalyticsReporter} />
             <Provider store={store}>
               <Providers>
                 <TermsWrapper>

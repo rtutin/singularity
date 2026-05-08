@@ -63,8 +63,9 @@ const CYBERIA_CHAIN_ID = 49406;
 const CYBERIA_CHAIN_ID_HEX = `0x${CYBERIA_CHAIN_ID.toString(16)}`;
 
 // Bridge state
-const bridgeDirection = ref<'sol_to_evm' | 'evm_to_sol'>('evm_to_sol');
+const bridgeDirection = ref<'sol_to_evm' | 'evm_to_sol'>('sol_to_evm');
 const bridgeAmount = ref('');
+const bridgeAddress = ref('');
 const bridgeProcessing = ref(false);
 
 const isAuthenticated = computed(() => !!page.props.auth?.user);
@@ -94,6 +95,11 @@ const sourceLabel = computed(() =>
 );
 const destLabel = computed(() =>
     bridgeDirection.value === 'sol_to_evm' ? 'Cyberia EVM' : 'Solana',
+);
+const destAddressPlaceholder = computed(() =>
+    bridgeDirection.value === 'sol_to_evm'
+        ? '0x... Cyberia EVM address'
+        : 'Solana address',
 );
 const sourceTokenLabel = computed(() =>
     bridgeDirection.value === 'sol_to_evm' ? 'CYBER.sol' : 'CYBER.sol',
@@ -753,6 +759,24 @@ const statusColor = (status: string) => {
                         }}
                     </button>
                 </div>
+            </div>
+
+            <div
+                class="w-full rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
+            >
+                <label
+                    for="bridge-address"
+                    class="mb-1 block text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                >
+                    {{ destLabel }} address
+                </label>
+                <input
+                    id="bridge-address"
+                    v-model="bridgeAddress"
+                    type="text"
+                    :placeholder="destAddressPlaceholder"
+                    class="w-full rounded border border-[#19140020] bg-[#FDFDFC] px-3 py-2 font-mono text-xs text-[#1b1b18] outline-none placeholder:text-[#c4c4c0] focus:border-[#1915014a] dark:border-[#3E3E3A] dark:bg-[#0a0a0a] dark:text-[#EDEDEC] dark:placeholder:text-[#555] dark:focus:border-[#62605b]"
+                />
             </div>
 
             <!-- Bridge Card -->

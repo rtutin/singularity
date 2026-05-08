@@ -18,7 +18,7 @@ export default function Updater(): null {
     account,
   } = useActiveWeb3React();
   const libraryFromChain = RPC_PROVIDERS[chainId];
-  const library = web3ModalLibrary ?? libraryFromChain;
+  const library = libraryFromChain ?? web3ModalLibrary;
 
   const dispatch = useDispatch();
 
@@ -28,30 +28,30 @@ export default function Updater(): null {
     chainId: number | undefined;
     blockNumber: number | null;
   }>({
-    chainId: currentChainId,
+    chainId,
     blockNumber: null,
   });
 
   const blockNumberCallback = useCallback(
     (blockNumber: number) => {
       setState((state) => {
-        if (currentChainId === state.chainId) {
+        if (chainId === state.chainId) {
           if (typeof state.blockNumber !== 'number')
-            return { chainId: currentChainId, blockNumber };
+            return { chainId, blockNumber };
           return {
-            chainId: currentChainId,
+            chainId,
             blockNumber,
           };
         }
         return state;
       });
     },
-    [currentChainId, setState],
+    [chainId, setState],
   );
 
   // attach/detach listeners
   useEffect(() => {
-    setState({ chainId: currentChainId, blockNumber: null });
+    setState({ chainId, blockNumber: null });
     if (!library || !windowVisible) return undefined;
 
     library
