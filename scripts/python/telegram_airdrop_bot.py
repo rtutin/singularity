@@ -1084,8 +1084,10 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # just skip this line instead of poisoning the whole message.
         if w3 is not None and checksum is not None and TOKEN_ADDRESS:
             try:
+                # TOKEN_ABI only declares mint/symbol; balanceOf lives in
+                # BALANCE_OF_ABI, which is the only thing we need here.
                 tg_contract = w3.eth.contract(
-                    address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI
+                    address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=BALANCE_OF_ABI
                 )
                 tg_balance = tg_contract.functions.balanceOf(checksum).call() / 10**18
                 lines.append(f"TG (global): {tg_balance:g}")
