@@ -223,10 +223,10 @@ def transliterate_name(value: str) -> str:
 
 def slugify_symbol(name: str, chat_id: int) -> str:
     """Derive a short ERC20 symbol from a human-readable name."""
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "", transliterate_name(name)).upper()
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "", transliterate_name(name)).upper()
     if not cleaned:
         return f"CHAT{abs(chat_id)}"
-    return cleaned[:8]
+    return cleaned[:16]
 
 
 def ensure_chat_token_schema():
