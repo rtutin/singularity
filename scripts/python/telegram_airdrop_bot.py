@@ -331,7 +331,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/wallet - show your linked wallet and explorer link\n"
         "/balance - show TG, all chat tokens, and pending rewards\n"
         "/token - show this chat's reward token (group only)\n"
-        "/stop - stop receiving\n"
         "/create_token <name> <interval> - (admins) create a chat reward token\n"
         "   e.g. /create_token MyChatToken 1h\n"
         "/set_rewards_interval <interval> - (admins) change payout interval\n"
@@ -344,7 +343,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def website_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("https://cyberia-temple.github.io")
+    await update.message.reply_text("https://cyberia.church")
 
 
 async def github_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -932,21 +931,21 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await status_msg.edit_text("\n".join(lines))
 
 
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+# async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     user_id = update.effective_user.id
 
-    try:
-        with engine.connect() as conn:
-            conn.execute(
-                text("DELETE FROM tg_wallets WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            )
-            conn.commit()
+#     try:
+#         with engine.connect() as conn:
+#             conn.execute(
+#                 text("DELETE FROM tg_wallets WHERE user_id = :user_id"),
+#                 {"user_id": user_id},
+#             )
+#             conn.commit()
 
-        await update.message.reply_text("You have been removed from the airdrop list.")
-    except Exception as e:
-        logger.error(f"Error in stop: {e}")
-        await update.message.reply_text("Error removing you from list.")
+#         await update.message.reply_text("You have been removed from the airdrop list.")
+#     except Exception as e:
+#         logger.error(f"Error in stop: {e}")
+#         await update.message.reply_text("Error removing you from list.")
 
 
 BALANCE_OF_ABI = [{
@@ -1032,6 +1031,23 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for symbol, amount_str in pending:
             human = int(amount_str) / 10**18
             lines.append(f"  {human:g} {symbol}")
+    elif not address:
+        # Help wallet-less users understand why pending may be zero. Show every
+        # chat-with-token they are a member of, so they know what to expect.
+        lines.append("")
+        if chat_tokens:
+            lines.append("You are eligible for these chat tokens (rewards will accrue here):")
+            for _cid, _name, symbol, _addr in chat_tokens:
+                lines.append(f"  {symbol}")
+            lines.append(
+                "Pending is empty right now. New rewards are credited on each "
+                "payout tick of the chat, so check back after the next interval."
+            )
+        else:
+            lines.append(
+                "No pending rewards yet. Write at least one message in a chat "
+                "that has a reward token, then wait for its next payout tick."
+            )
 
     await update.message.reply_text("\n".join(lines))
 
@@ -1174,7 +1190,7 @@ async def post_init(application: Application):
             BotCommand("wallet", "Show your linked wallet"),
             BotCommand("balance", "Show TG, chat tokens, and pending rewards"),
             BotCommand("token", "Show this chat's reward token"),
-            BotCommand("stop", "Stop receiving TG"),
+            # BotCommand("stop", "Stop receiving TG"),
             BotCommand("github", "Link GitHub for GITHUB airdrop"),
             BotCommand("website", "Open the project website"),
             BotCommand("create_token", "(admins) Create a chat reward token"),
@@ -1209,7 +1225,7 @@ def run_dispatcher():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("set_wallet", set_wallet_command))
     application.add_handler(CommandHandler("wallet", wallet_command))
-    application.add_handler(CommandHandler("stop", stop_command))
+    # application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("github", github_command))
