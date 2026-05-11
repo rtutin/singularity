@@ -66,27 +66,8 @@ export default function Updater(): null {
 
     library.on('block', blockNumberCallback);
 
-    if (web3ModalLibrary) {
-      web3ModalLibrary.on('network', (newNetwork) => {
-        if (state.chainId && newNetwork.chainId !== state.chainId) {
-          setTimeout(() => {
-            document.location.reload();
-          }, 1500);
-        }
-      });
-    }
-
     return () => {
       library.removeListener('block', blockNumberCallback);
-      if (web3ModalLibrary) {
-        web3ModalLibrary.removeListener('network', (newNetwork) => {
-          if (state.chainId && newNetwork.chainId !== state.chainId) {
-            setTimeout(() => {
-              document.location.reload();
-            }, 1500);
-          }
-        });
-      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChainId, chainId, windowVisible]);

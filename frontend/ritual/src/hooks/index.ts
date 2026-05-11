@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ChainId, Pair } from '@uniswap/sdk';
 import { getSigner } from 'utils';
 import {
@@ -47,9 +47,19 @@ export function useActiveWeb3React() {
     return web3ModalChainId;
   }, [web3ModalChainId]);
 
-  const provider = walletProvider
-    ? new providers.Web3Provider(walletProvider)
-    : undefined;
+  useEffect(() => {
+    if (web3ModalChainId && SUPPORTED_CHAINIDS.includes(web3ModalChainId)) {
+      localStorage.setItem('localChainId', web3ModalChainId.toString());
+    }
+  }, [web3ModalChainId]);
+
+  const provider = useMemo(
+    () =>
+      walletProvider
+        ? new providers.Web3Provider(walletProvider, 'any')
+        : undefined,
+    [walletProvider],
+  );
 
   return {
     account: address,

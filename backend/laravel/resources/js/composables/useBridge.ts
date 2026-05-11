@@ -26,6 +26,10 @@ const SOLANA_RPC = 'https://mainnet.helius-rpc.com/?api-key=7e740762-a25d-4d37-b
 const SOLANA_NATIVE_MINT = new PublicKey('E67WWiQY4s9SZbCyFVTh2CEjorEYbhuVJQUZb3Mbpump');
 // const SOLANA_NATIVE_MINT = new PublicKey('6SvS85B6ufx8YA6wjGNdRvGZ4RbYUhXQjnaLgEbcfH8o');
 const SOLANA_NATIVE_DECIMALS = 6;
+const SOLANA_TX_SEND_OPTIONS = {
+    preflightCommitment: 'confirmed' as const,
+    maxRetries: 5,
+};
 
 // Hot wallet — relayer's Solana address (receives deposits, sends withdrawals)
 const BRIDGE_HOT_WALLET = new PublicKey('E6E8AeKoT6i2zmwrGyDF2LwfEfjX9Xg8LfEj2Fu8Yf7w');
@@ -199,16 +203,35 @@ export const useBridge = () => {
             ),
         );
 
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         tx.recentBlockhash = blockhash;
         tx.feePayer = userPubkey;
 
-        const { signature } = await phantom.signAndSendTransaction(tx);
+        const { signature } = await phantom.signAndSendTransaction(tx, SOLANA_TX_SEND_OPTIONS);
 
-        await connection.confirmTransaction(
-            { signature, blockhash, lastValidBlockHeight },
-            'confirmed',
-        );
+        try {
+            await connection.confirmTransaction(
+                { signature, blockhash, lastValidBlockHeight },
+                'confirmed',
+            );
+        } catch (error) {
+            const status = await connection.getSignatureStatus(signature, {
+                searchTransactionHistory: true,
+            });
+
+            if (
+                status.value?.confirmationStatus === 'confirmed' ||
+                status.value?.confirmationStatus === 'finalized'
+            ) {
+                return { txHash: signature, nonce: 0 };
+            }
+
+            if (error instanceof Error && error.message.includes('block height exceeded')) {
+                throw new Error('Solana transaction expired before confirmation. Please try again.');
+            }
+
+            throw error;
+        }
 
         return { txHash: signature, nonce: 0 };
     };
@@ -243,7 +266,10 @@ function getPhantom() {
     type Phantom = {
         isPhantom: boolean;
         publicKey: { toBase58(): string; toBytes(): Uint8Array } | null;
-        signAndSendTransaction(tx: Transaction): Promise<{ signature: string }>;
+        signAndSendTransaction(
+            tx: Transaction,
+            options?: typeof SOLANA_TX_SEND_OPTIONS,
+        ): Promise<{ signature: string }>;
     };
     return (window as unknown as { phantom?: { solana?: Phantom } }).phantom?.solana ?? null;
 }

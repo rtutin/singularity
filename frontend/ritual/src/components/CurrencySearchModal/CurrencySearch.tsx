@@ -35,7 +35,7 @@ import { useCurrencyBalances } from 'state/wallet/hooks';
 import { useUSDCPricesFromAddresses } from 'utils/useUSDCPrice';
 import { wrappedCurrency } from 'utils/wrappedCurrency';
 import CustomTabSwitch from 'components/v3/CustomTabSwitch';
-import { useLocalStorage } from '@orderly.network/hooks';
+import { useLocalStorage } from 'hooks/useLocalStorage';
 import { useUserAddedTokens } from 'state/user/hooks';
 
 interface CurrencySearchProps {
