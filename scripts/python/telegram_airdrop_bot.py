@@ -335,7 +335,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/balance - show TG, all chat tokens, and pending rewards\n"
         "/token - show this chat's reward token (group only)\n"
         "/cancel - cancel an interactive prompt\n"
-        "/create_token <name> <interval> - (admins) create a chat reward token\n"
+        "/create_token [name] [interval] - (admins) create a chat reward token\n"
+        "   (prompts for missing arguments; use /cancel to abort)\n"
         "   e.g. /create_token MyChatToken 1h\n"
         "/set_rewards_interval <interval> - (admins) change payout interval\n"
         "/reward_now - (admins) trigger an extra payout right now\n"
@@ -389,46 +390,19 @@ async def github_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error saving. Try again.")
 
 
-async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /create_token <name> <rewards_interval>
-    Creates a per-chat ERC20Votes reward token via the on-chain factory and
-    wires it to this chat. Only the chat owner can run it; must be used from the
-    target group/supergroup.
+async def _process_create_token(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+    name: str, interval_raw: str,
+) -> None:
+    """Shared implementation for /create_token and the follow-up prompts.
+
+    Validates name & interval, persists, deploys on-chain, and stores the
+    resulting token address.
     """
     chat = update.effective_chat
     user = update.effective_user
     if chat is None or user is None:
         return
-
-    if chat.type not in ("group", "supergroup"):
-        await update.message.reply_text(
-            "This command must be used inside a group chat."
-        )
-        return
-
-    if not await is_chat_owner(update, context):
-        await update.message.reply_text("Only the chat owner can create a token.")
-        logger.warning(
-            "Unauthorized create_token attempt by non-owner user_id=%s username=%s chat_id=%s",
-            user.id,
-            user.username,
-            chat.id,
-        )
-        return
-
-    args = context.args or []
-    if len(args) < 2:
-        await update.message.reply_text(
-            "Usage: /create_token <name> <rewards_interval>\n"
-            "Example: /create_token MyChatToken 1h\n"
-            "Intervals: 30s, 15m, 1h, 2d, 1w"
-        )
-        return
-
-    # name may contain spaces if the user passes them; last token is always the interval
-    name = " ".join(args[:-1]).strip()
-    interval_raw = args[-1]
 
     if not name or len(name) > 48:
         await update.message.reply_text("Token name must be 1..48 characters.")
@@ -451,42 +425,35 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     symbol = slugify_symbol(name, chat.id)
 
-    # Persist the request first so we never lose it if the on-chain call blows up.
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                    INSERT INTO chat_tokens
-                        (chat_id, name, symbol, rewards_interval, created_by)
-                    VALUES
-                        (:chat_id, :name, :symbol, :interval, :user_id)
-                    ON CONFLICT(chat_id) DO UPDATE SET
-                        name = excluded.name,
-                        symbol = excluded.symbol,
-                        token_address = NULL,
-                        rewards_interval = excluded.rewards_interval,
-                        created_by = excluded.created_by,
-                        created_at = datetime('now'),
-                        last_payout_at = NULL
-                """),
-                {
-                    "chat_id": chat.id,
-                    "name": name,
-                    "symbol": symbol,
-                    "interval": rewards_interval,
-                    "user_id": user.id,
-                },
-            )
-    except Exception as e:
-        logger.error(f"Error persisting chat_token row for chat {chat.id}: {e}")
-        await update.message.reply_text("Internal error saving token. Try again.")
-        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO chat_tokens
+                    (chat_id, name, symbol, rewards_interval, created_by)
+                VALUES
+                    (:chat_id, :name, :symbol, :interval, :user_id)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    name = excluded.name,
+                    symbol = excluded.symbol,
+                    token_address = NULL,
+                    rewards_interval = excluded.rewards_interval,
+                    created_by = excluded.created_by,
+                    created_at = datetime('now'),
+                    last_payout_at = NULL
+            """),
+            {
+                "chat_id": chat.id,
+                "name": name,
+                "symbol": symbol,
+                "interval": rewards_interval,
+                "user_id": user.id,
+            },
+        )
 
     status_msg = await update.message.reply_text(
         f"Deploying token {name} ({symbol})... this may take a few seconds."
     )
 
-    # On-chain deployment
     token_address = None
     try:
         from web3 import Web3
@@ -523,7 +490,6 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         if receipt.status != 1:
             raise RuntimeError(f"tx reverted: {tx_hash.hex()}")
 
-        # Only decode factory logs; child token constructor emits its own logs too.
         for log in receipt.logs:
             topics = log.get("topics") or []
             if not topics:
@@ -532,18 +498,15 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 continue
             if topics[0].hex().lower() != TOKEN_CREATED_TOPIC.lower():
                 continue
-
             event = factory.events.TokenCreated().process_log(log)
             token_address = event["args"]["token"]
             break
 
         if not token_address:
             raise RuntimeError("TokenCreated event did not include token address")
-
         token_address = Web3.to_checksum_address(token_address)
     except Exception as e:
         logger.error(f"On-chain createToken failed for chat {chat.id}: {e}")
-        # Roll back the DB row so the user can retry.
         with engine.begin() as conn:
             conn.execute(
                 text("DELETE FROM chat_tokens WHERE chat_id = :c AND token_address IS NULL"),
@@ -565,6 +528,65 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"Address: {token_address}\n"
         f"Rewards interval: {format_interval(rewards_interval)}"
     )
+
+
+async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /create_token <name> <rewards_interval>
+    Creates a per-chat ERC20Votes reward token via the on-chain factory and
+    wires it to this chat. Only the chat owner can run it; must be used from the
+    target group/supergroup.
+
+    If arguments are omitted the bot prompts for them interactively.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or user is None:
+        return
+
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text(
+            "This command must be used inside a group chat."
+        )
+        return
+
+    if not await is_chat_owner(update, context):
+        await update.message.reply_text("Only the chat owner can create a token.")
+        logger.warning(
+            "Unauthorized create_token attempt by non-owner user_id=%s username=%s chat_id=%s",
+            user.id,
+            user.username,
+            chat.id,
+        )
+        return
+
+    args = context.args or []
+
+    if not args:
+        context.user_data["awaiting_token_name"] = True
+        context.user_data["awaiting_token_chat_id"] = chat.id
+        await update.message.reply_text(
+            "Send the token name now (1-48 characters), or /cancel to abort."
+        )
+        return
+
+    if len(args) == 1:
+        name = args[0].strip()
+        if not name or len(name) > 48:
+            await update.message.reply_text("Token name must be 1..48 characters.")
+            return
+        context.user_data["token_name"] = name
+        context.user_data["awaiting_token_interval"] = True
+        context.user_data["awaiting_token_chat_id"] = chat.id
+        await update.message.reply_text(
+            "Send the rewards interval now (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
+        )
+        return
+
+    # 2+ args: last token is always the interval
+    name = " ".join(args[:-1]).strip()
+    interval_raw = args[-1]
+    await _process_create_token(update, context, name, interval_raw)
 
 
 async def set_rewards_interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -965,11 +987,12 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel any pending interactive flow (currently only /set_wallet)."""
-    if context.user_data.pop("awaiting_wallet", None):
-        await update.message.reply_text("Cancelled.")
-    else:
-        await update.message.reply_text("Nothing to cancel.")
+    """Cancel any pending interactive flow (/set_wallet or /create_token)."""
+    cancelled = bool(context.user_data.pop("awaiting_wallet", None))
+    for key in ("awaiting_token_name", "awaiting_token_interval", "token_name", "awaiting_token_chat_id"):
+        if context.user_data.pop(key, None) is not None:
+            cancelled = True
+    await update.message.reply_text("Cancelled." if cancelled else "Nothing to cancel.")
 
 
 async def pending_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -992,6 +1015,68 @@ async def pending_input_handler(update: Update, context: ContextTypes.DEFAULT_TY
     candidate = text_value.split()[0]
     context.user_data.pop("awaiting_wallet", None)
     await _process_set_wallet(update, context, candidate)
+
+
+async def pending_create_token_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Catch the next text message from a user who issued bare /create_token.
+
+    Fires when `awaiting_token_name` or `awaiting_token_interval` is set in
+    the user's `user_data`.  The handler validates the chat matches the one
+    that started the flow to prevent cross-chat confusion.
+    """
+    awaiting_name = context.user_data.get("awaiting_token_name")
+    awaiting_interval = context.user_data.get("awaiting_token_interval")
+    if not awaiting_name and not awaiting_interval:
+        return
+
+    chat = update.effective_chat
+    if chat is None or chat.id != context.user_data.get("awaiting_token_chat_id"):
+        return
+
+    user = update.effective_user
+    if user is None:
+        return
+
+    msg = update.effective_message
+    if msg is None or not msg.text:
+        return
+
+    text_value = msg.text.strip()
+    if text_value.startswith("/"):
+        return
+
+    # Use the first line as the value so multi-line pastes don't confuse us.
+    value = text_value.splitlines()[0].strip()
+
+    if awaiting_name:
+        context.user_data.pop("awaiting_token_name", None)
+        name = value
+        if not name or len(name) > 48:
+            context.user_data["awaiting_token_name"] = True
+            await update.message.reply_text(
+                "Token name must be 1..48 characters. Send it again, or /cancel to abort."
+            )
+            return
+        # Name looks OK -- ask for interval now.
+        context.user_data["token_name"] = name
+        context.user_data["awaiting_token_interval"] = True
+        await update.message.reply_text(
+            "Send the rewards interval now (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
+        )
+        return
+
+    if awaiting_interval:
+        context.user_data.pop("awaiting_token_interval", None)
+        name = context.user_data.pop("token_name", None)
+        if not name:
+            context.user_data.pop("awaiting_token_chat_id", None)
+            await update.message.reply_text(
+                "Something went wrong — the token name was lost. Try /create_token again."
+            )
+            return
+        context.user_data.pop("awaiting_token_chat_id", None)
+        interval_raw = value
+        await _process_create_token(update, context, name, interval_raw)
 
 
 async def unset_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1332,6 +1417,15 @@ def run_dispatcher():
         MessageHandler(
             filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
             pending_input_handler,
+        )
+    )
+
+    # Capture name/interval replies after a bare /create_token in groups.
+    application.add_handler(
+        MessageHandler(
+            (filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP)
+            & filters.TEXT & ~filters.COMMAND,
+            pending_create_token_handler,
         )
     )
 
