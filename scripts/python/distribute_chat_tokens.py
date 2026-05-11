@@ -67,8 +67,6 @@ def _parse_ts(value):
 
 
 def distribute():
-    logger.info("Starting chat-token distribution")
-
     with engine.connect() as conn:
         tokens = conn.execute(
             text("""
@@ -80,10 +78,10 @@ def distribute():
         ).fetchall()
 
     if not tokens:
-        logger.info("No chat tokens configured")
         return
 
     now = datetime.now(timezone.utc)
+    started = False
 
     for chat_id, name, symbol, token_address, interval, reward_amount, last_payout_at in tokens:
         last = _parse_ts(last_payout_at)
@@ -94,6 +92,12 @@ def distribute():
             )
             continue
 
+        # Recipients = users we have seen in this chat AND who have linked a
+        # wallet globally. `chat_members` is maintained by the bot:
+        #   - INSERT on every message in the chat (incl. lurker first activity)
+        #   - DELETE on left_chat_member / chat_member updates (left, kicked)
+        # `tg_wallets` is global, so a user only has to /set_wallet once
+        # anywhere to receive rewards from every chat they belong to.
         with engine.connect() as conn:
             wallets = conn.execute(
                 text("""
@@ -106,7 +110,6 @@ def distribute():
             ).fetchall()
 
         if not wallets:
-            logger.info("chat %s (%s): no wallets registered, skipping", chat_id, symbol)
             # still bump timestamp so we do not re-evaluate every second for nothing
             with engine.begin() as conn:
                 conn.execute(
@@ -114,6 +117,10 @@ def distribute():
                     {"t": now.strftime("%Y-%m-%d %H:%M:%S"), "c": chat_id},
                 )
             continue
+
+        if not started:
+            logger.info("Starting chat-token distribution")
+            started = True
 
         logger.info(
             "chat %s (%s): minting to %d wallets (%s each)",
@@ -188,7 +195,8 @@ def distribute():
             failed_count,
         )
 
-    logger.info("Distribution complete")
+    if started:
+        logger.info("Distribution complete")
 
 
 if __name__ == "__main__":

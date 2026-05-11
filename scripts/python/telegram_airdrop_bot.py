@@ -9,7 +9,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from telegram import BotCommand, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    ChatMemberHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.error import TelegramError
 from telegram.request import HTTPXRequest
 
@@ -584,13 +591,21 @@ async def set_rewards_interval_command(update: Update, context: ContextTypes.DEF
 
 
 def _get_chat_payout_recipients(chat_id: int):
-    """Return chat members with wallet addresses from the global tg_wallets table."""
+    """Return [(user_id, address), ...] for users that have BOTH been seen in
+    this chat (`chat_members`) AND linked a wallet globally (`tg_wallets`).
+
+    `chat_members` is maintained by the bot via message tracking and
+    left/kicked event handlers, so it reflects current membership for users
+    the bot has ever seen. `tg_wallets` is global, so a user only needs to
+    /set_wallet once anywhere to receive rewards from every chat they
+    participate in.
+    """
     with engine.connect() as conn:
         return conn.execute(
             text("""
-                SELECT cm.user_id, wallets.address
+                SELECT cm.user_id, w.address
                 FROM chat_members cm
-                JOIN tg_wallets wallets ON wallets.user_id = cm.user_id
+                JOIN tg_wallets w ON w.user_id = cm.user_id
                 WHERE cm.chat_id = :c
             """),
             {"c": chat_id},
@@ -605,6 +620,14 @@ def _record_chat_member(chat_id: int, user_id: int):
                 VALUES (:c, :u, datetime('now'), datetime('now'))
                 ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen = datetime('now')
             """),
+            {"c": chat_id, "u": user_id},
+        )
+
+
+def _forget_chat_member(chat_id: int, user_id: int):
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM chat_members WHERE chat_id = :c AND user_id = :u"),
             {"c": chat_id, "u": user_id},
         )
 
@@ -645,7 +668,8 @@ async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     recipients = _get_chat_payout_recipients(chat.id)
     if not recipients:
         await update.message.reply_text(
-            "No eligible recipients: no chat members have a wallet in tg_wallets."
+            "No eligible recipients: no current member of this chat has registered "
+            "a wallet via /set_wallet yet."
         )
         return
 
@@ -793,20 +817,77 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def track_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Record (chat_id, user_id) for any message in a group. Used by the payout
-    script to know who is a member of a chat that has its own reward token."""
+    """Record (chat_id, user_id) for any message in a group, and remove the
+    row when a service message reports the user left or was kicked. Used by
+    the payout pipeline to know who currently belongs to a chat that has its
+    own reward token."""
     chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or chat.type not in ("group", "supergroup"):
+        return
+
+    # Membership departures arrive as service messages on the same update.
+    if message is not None:
+        left = getattr(message, "left_chat_member", None)
+        if left is not None and not left.is_bot:
+            try:
+                _forget_chat_member(chat.id, left.id)
+                logger.info(
+                    "chat_members: removed user_id=%s from chat_id=%s (left/kicked via service msg)",
+                    left.id, chat.id,
+                )
+            except Exception as e:
+                logger.debug(f"forget_chat_member (left) failed: {e}")
+
+        new_members = getattr(message, "new_chat_members", None) or []
+        for member in new_members:
+            if member.is_bot:
+                continue
+            try:
+                _record_chat_member(chat.id, member.id)
+            except Exception as e:
+                logger.debug(f"record_chat_member (new) failed: {e}")
+
+    # Anyone whose message reached us is, by definition, currently in the chat.
     user = update.effective_user
-    if chat is None or user is None:
-        return
-    if chat.type not in ("group", "supergroup"):
-        return
-    if user.is_bot:
+    if user is None or user.is_bot:
         return
     try:
         _record_chat_member(chat.id, user.id)
     except Exception as e:
         logger.debug(f"track_chat_member failed: {e}")
+
+
+async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle `chat_member` updates -- fires for *every* membership status
+    transition in groups where the bot is admin, including silent leaves and
+    bans that never produce a visible service message. Required for the
+    payout filter to stay accurate when users quietly leave."""
+    cmu = update.chat_member
+    if cmu is None:
+        return
+    chat = cmu.chat
+    if chat.type not in ("group", "supergroup"):
+        return
+    user = cmu.new_chat_member.user
+    if user.is_bot:
+        return
+
+    new_status = cmu.new_chat_member.status
+    # Statuses that mean "currently in the chat".
+    present = {"creator", "administrator", "member", "restricted"}
+    try:
+        if new_status in present:
+            _record_chat_member(chat.id, user.id)
+        else:
+            # left, kicked, etc.
+            _forget_chat_member(chat.id, user.id)
+            logger.info(
+                "chat_members: removed user_id=%s from chat_id=%s (status=%s via chat_member update)",
+                user.id, chat.id, new_status,
+            )
+    except Exception as e:
+        logger.debug(f"on_chat_member_update failed: {e}")
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -871,12 +952,19 @@ def run_dispatcher():
         group=1,
     )
 
+    # Catch silent leaves/kicks and joins. Requires the bot to be admin in the
+    # chat to receive these updates from Telegram. Without admin rights only
+    # service messages (handled above) will fire.
+    application.add_handler(
+        ChatMemberHandler(on_chat_member_update, ChatMemberHandler.CHAT_MEMBER)
+    )
+
     application.add_error_handler(error_handler)
 
     logger.info("Bot started, polling...")
 
     try:
-        application.run_polling(allowed_updates=["message"])
+        application.run_polling(allowed_updates=["message", "chat_member"])
     except Exception as e:
         logger.error(f"Polling error: {e}")
         raise
