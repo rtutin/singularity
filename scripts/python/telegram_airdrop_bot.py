@@ -34,7 +34,9 @@ HTTP_PROXY = os.environ.get("HTTP_PROXY")
 
 DB_PATH = os.environ.get("DB_PATH", "/home/lain/random/singularity/backend/laravel/database/database.sqlite")
 
-TOKEN_ADDRESS = "0x4A3B5919e60fd290172955753DdA9216E396170A"
+TOKEN_ADDRESS = os.environ.get(
+    "TG_TOKEN_ADDRESS", "0x4A3B5919e60fd290172955753DdA9216E396170A"
+).strip() or None
 TOKEN_ABI = [
     {
         "inputs": [
@@ -327,10 +329,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Commands:\n"
         "/start - start receiving TG\n"
-        "/set_wallet <address> - link your wallet (claims any pending rewards)\n"
+        "/set_wallet [address] - link your wallet (asks for address if omitted)\n"
+        "/unset_wallet - unlink your wallet (pending rewards are kept)\n"
         "/wallet - show your linked wallet and explorer link\n"
         "/balance - show TG, all chat tokens, and pending rewards\n"
         "/token - show this chat's reward token (group only)\n"
+        "/cancel - cancel an interactive prompt\n"
         "/create_token <name> <interval> - (admins) create a chat reward token\n"
         "   e.g. /create_token MyChatToken 1h\n"
         "/set_rewards_interval <interval> - (admins) change payout interval\n"
@@ -850,17 +854,19 @@ def _claim_pending_rewards(user_id: int, address: str):
     return claimed, failed, totals
 
 
-async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage: /set_wallet <address>\nExample: /set_wallet 0x1234...")
-        return
-
-    address = args[0].strip()
+async def _process_set_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE, address: str):
+    """Shared implementation for /set_wallet <addr> and the follow-up message
+    captured after a bare /set_wallet. Validates, persists, claims pending."""
     user_id = update.effective_user.id
 
     if not is_valid_eth_address(address):
-        await update.message.reply_text("Invalid address format. Expected 0x...")
+        # Re-arm the prompt so the user can simply retry without re-invoking
+        # /set_wallet. They can /cancel to bail out.
+        context.user_data["awaiting_wallet"] = True
+        await update.message.reply_text(
+            "Invalid address format. Expected 0x followed by 40 hex characters.\n"
+            "Send a valid address, or /cancel to abort."
+        )
         return
 
     try:
@@ -931,21 +937,89 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await status_msg.edit_text("\n".join(lines))
 
 
-# async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     user_id = update.effective_user.id
+async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """`/set_wallet <address>` -- bind a wallet and claim pending rewards.
 
-#     try:
-#         with engine.connect() as conn:
-#             conn.execute(
-#                 text("DELETE FROM tg_wallets WHERE user_id = :user_id"),
-#                 {"user_id": user_id},
-#             )
-#             conn.commit()
+    If invoked without an argument, the bot asks the user to send the address
+    in the next message. The follow-up handler (`pending_input_handler`)
+    picks it up using `context.user_data["awaiting_wallet"]`.
+    """
+    args = context.args or []
+    chat = update.effective_chat
+    if not args:
+        # Interactive follow-up only makes sense in DMs -- in groups the bot
+        # would otherwise hijack the next casual message the user sends.
+        if chat is not None and chat.type == "private":
+            context.user_data["awaiting_wallet"] = True
+            await update.message.reply_text(
+                "Send your wallet address now (a single message starting with 0x), "
+                "or /cancel to abort."
+            )
+        else:
+            await update.message.reply_text(
+                "Usage: /set_wallet <address>\nExample: /set_wallet 0x1234..."
+            )
+        return
+    context.user_data.pop("awaiting_wallet", None)
+    await _process_set_wallet(update, context, args[0].strip())
 
-#         await update.message.reply_text("You have been removed from the airdrop list.")
-#     except Exception as e:
-#         logger.error(f"Error in stop: {e}")
-#         await update.message.reply_text("Error removing you from list.")
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel any pending interactive flow (currently only /set_wallet)."""
+    if context.user_data.pop("awaiting_wallet", None):
+        await update.message.reply_text("Cancelled.")
+    else:
+        await update.message.reply_text("Nothing to cancel.")
+
+
+async def pending_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Catch the next text message from a user who issued bare /set_wallet.
+
+    Only fires when `awaiting_wallet` is set in the user's `user_data` and the
+    message text looks like a single address-shaped token. Anything else is
+    ignored so we don't accidentally hijack normal chat messages.
+    """
+    if not context.user_data.get("awaiting_wallet"):
+        return
+    msg = update.effective_message
+    if msg is None or not msg.text:
+        return
+    text_value = msg.text.strip()
+    # Bare addresses only -- skip if user typed a command in the meantime.
+    if text_value.startswith("/"):
+        return
+    # If the user sent multiple tokens, take the first.
+    candidate = text_value.split()[0]
+    context.user_data.pop("awaiting_wallet", None)
+    await _process_set_wallet(update, context, candidate)
+
+
+async def unset_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove the linked wallet without dropping accrued pending rewards.
+
+    The user can /set_wallet again later (possibly with a different address)
+    and the pending balance will be minted to the new wallet.
+    """
+    user_id = update.effective_user.id
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM tg_wallets WHERE user_id = :u"),
+                {"u": user_id},
+            )
+    except Exception as e:
+        logger.error(f"Error in unset_wallet: {e}")
+        await update.message.reply_text("Error removing wallet. Try again.")
+        return
+
+    if result.rowcount == 0:
+        await update.message.reply_text("No wallet was linked.")
+        return
+
+    await update.message.reply_text(
+        "Wallet removed. Any pending rewards stay credited and will be minted "
+        "to the next wallet you link with /set_wallet."
+    )
 
 
 BALANCE_OF_ABI = [{
@@ -997,33 +1071,46 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append("Wallet: not set -- use /set_wallet <address> to claim pending rewards.")
 
-    try:
-        w3 = Web3(Web3.HTTPProvider(RPC_URL))
-        if address:
+    if address:
+        try:
+            w3 = Web3(Web3.HTTPProvider(RPC_URL))
             checksum = Web3.to_checksum_address(address)
-            tg_contract = w3.eth.contract(
-                address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI
-            )
-            tg_balance = tg_contract.functions.balanceOf(checksum).call() / 10**18
-            lines.append(f"TG (global): {tg_balance:g}")
+        except Exception as e:
+            logger.exception(f"balance: web3/checksum init failed: {e}")
+            w3 = None
+            checksum = None
 
-            if chat_tokens:
-                lines.append("")
-                lines.append("Chat token balances:")
-                for _cid, _name, symbol, token_address in chat_tokens:
-                    try:
-                        c = w3.eth.contract(
-                            address=Web3.to_checksum_address(token_address),
-                            abi=BALANCE_OF_ABI,
-                        )
-                        bal = c.functions.balanceOf(checksum).call() / 10**18
-                        lines.append(f"  {symbol}: {bal:g}")
-                    except Exception as e:
-                        logger.debug(f"balance read failed for {symbol}: {e}")
-                        lines.append(f"  {symbol}: (read error)")
-    except Exception as e:
-        logger.error(f"Error in balance on-chain read: {e}")
-        lines.append("(on-chain read failed, try again later)")
+        # Global TG token is optional: if TG_TOKEN_ADDRESS isn't configured we
+        # just skip this line instead of poisoning the whole message.
+        if w3 is not None and checksum is not None and TOKEN_ADDRESS:
+            try:
+                tg_contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI
+                )
+                tg_balance = tg_contract.functions.balanceOf(checksum).call() / 10**18
+                lines.append(f"TG (global): {tg_balance:g}")
+            except Exception as e:
+                logger.exception(
+                    f"balance: TG global read failed for {address} at {TOKEN_ADDRESS}: {e}"
+                )
+                lines.append("TG (global): (read error)")
+
+        if w3 is not None and checksum is not None and chat_tokens:
+            lines.append("")
+            lines.append("Chat token balances:")
+            for _cid, _name, symbol, token_address in chat_tokens:
+                try:
+                    c = w3.eth.contract(
+                        address=Web3.to_checksum_address(token_address),
+                        abi=BALANCE_OF_ABI,
+                    )
+                    bal = c.functions.balanceOf(checksum).call() / 10**18
+                    lines.append(f"  {symbol}: {bal:g}")
+                except Exception as e:
+                    logger.exception(
+                        f"balance: chat-token read failed for {symbol} ({token_address}): {e}"
+                    )
+                    lines.append(f"  {symbol}: (read error)")
 
     if pending:
         lines.append("")
@@ -1186,11 +1273,12 @@ async def post_init(application: Application):
         [
             BotCommand("start", "Start receiving TG"),
             BotCommand("help", "Show available commands"),
-            BotCommand("set_wallet", "Link wallet and claim pending rewards"),
+            BotCommand("set_wallet", "Link wallet (asks for address if omitted)"),
+            BotCommand("unset_wallet", "Unlink your wallet (keep pending)"),
             BotCommand("wallet", "Show your linked wallet"),
             BotCommand("balance", "Show TG, chat tokens, and pending rewards"),
             BotCommand("token", "Show this chat's reward token"),
-            # BotCommand("stop", "Stop receiving TG"),
+            BotCommand("cancel", "Cancel an interactive prompt"),
             BotCommand("github", "Link GitHub for GITHUB airdrop"),
             BotCommand("website", "Open the project website"),
             BotCommand("create_token", "(admins) Create a chat reward token"),
@@ -1224,8 +1312,9 @@ def run_dispatcher():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("set_wallet", set_wallet_command))
+    application.add_handler(CommandHandler("unset_wallet", unset_wallet_command))
     application.add_handler(CommandHandler("wallet", wallet_command))
-    # application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("github", github_command))
@@ -1233,6 +1322,16 @@ def run_dispatcher():
     application.add_handler(CommandHandler("create_token", create_token_command))
     application.add_handler(CommandHandler("set_rewards_interval", set_rewards_interval_command))
     application.add_handler(CommandHandler("reward_now", reward_now_command))
+
+    # Capture the "next message is the address" reply after a bare /set_wallet
+    # in DMs. Restricted to private chats so the bot never hijacks ordinary
+    # group messages.
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            pending_input_handler,
+        )
+    )
 
     # Track chat membership on any group message, including commands.
     application.add_handler(
