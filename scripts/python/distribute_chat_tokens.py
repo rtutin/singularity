@@ -92,12 +92,11 @@ def distribute():
             )
             continue
 
-        # Recipients = users we have seen in this chat AND who have linked a
-        # wallet globally. `chat_members` is maintained by the bot:
-        #   - INSERT on every message in the chat (incl. lurker first activity)
-        #   - DELETE on left_chat_member / chat_member updates (left, kicked)
-        # `tg_wallets` is global, so a user only has to /set_wallet once
-        # anywhere to receive rewards from every chat they belong to.
+        # Two cohorts:
+        #   wallets  -- chat members with a linked wallet (mint on-chain now)
+        #   pending  -- chat members without a wallet (credit pending_rewards
+        #               so they can claim everything as soon as they /set_wallet)
+        # `chat_members` is maintained by the bot, `tg_wallets` is global.
         with engine.connect() as conn:
             wallets = conn.execute(
                 text("""
@@ -108,9 +107,46 @@ def distribute():
                 """),
                 {"c": chat_id},
             ).fetchall()
+            pending_members = conn.execute(
+                text("""
+                    SELECT cm.user_id
+                    FROM chat_members cm
+                    LEFT JOIN tg_wallets w ON w.user_id = cm.user_id
+                    WHERE cm.chat_id = :c AND w.user_id IS NULL
+                """),
+                {"c": chat_id},
+            ).fetchall()
+
+        amount = int(reward_amount)
+
+        # Credit pending balances first; this is cheap and unconditional, so it
+        # happens even if the on-chain mint half later fails.
+        if pending_members:
+            with engine.begin() as conn:
+                for (uid,) in pending_members:
+                    conn.execute(
+                        text("""
+                            INSERT INTO pending_rewards (chat_id, user_id, amount, updated_at)
+                            VALUES (:c, :u, :amt, datetime('now'))
+                            ON CONFLICT(chat_id, user_id) DO UPDATE SET
+                                amount = CAST(CAST(amount AS INTEGER) + :amt_int AS TEXT),
+                                updated_at = datetime('now')
+                        """),
+                        {
+                            "c": chat_id,
+                            "u": uid,
+                            "amt": str(amount),
+                            "amt_int": amount,
+                        },
+                    )
+            logger.info(
+                "chat %s (%s): credited pending %s to %d wallet-less members",
+                chat_id, symbol, reward_amount, len(pending_members),
+            )
 
         if not wallets:
-            # still bump timestamp so we do not re-evaluate every second for nothing
+            # Bump timestamp so we do not re-evaluate every second; pending was
+            # already credited above (if any).
             with engine.begin() as conn:
                 conn.execute(
                     text("UPDATE chat_tokens SET last_payout_at = :t WHERE chat_id = :c"),
@@ -130,7 +166,7 @@ def distribute():
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(token_address), abi=CHAT_TOKEN_ABI
         )
-        amount = int(reward_amount)
+        # `amount` is already set above (same int(reward_amount) used for pending).
         nonce = w3.eth.get_transaction_count(account.address, "pending")
         success_count = 0
         failed_count = 0

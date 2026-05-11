@@ -57,6 +57,7 @@ TOKEN_ABI = [
 
 RPC_URL = os.environ.get("RPC_URL", "https://rpc.cyberia.church")
 CHAIN_ID = int(os.environ.get("CHAIN_ID", "49406"))
+EXPLORER_URL = os.environ.get("EXPLORER_URL", "https://explorer.cyberia.church").rstrip("/")
 
 TELEGRAM_TOKEN_FACTORY = os.environ.get("TELEGRAM_TOKEN_FACTORY")
 DEPLOYER_PK = os.environ.get("DEPLOYER_PK")
@@ -257,6 +258,19 @@ def ensure_chat_token_schema():
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """))
+        # Owed rewards for users without a wallet yet. distribute_chat_tokens.py
+        # adds to `amount` (uint256 as text) on every payout tick where the
+        # user is a chat member but has no entry in tg_wallets. /set_wallet
+        # flushes these on-chain in one mint per chat token.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pending_rewards (
+                chat_id    INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                amount     TEXT NOT NULL DEFAULT '0',
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (chat_id, user_id)
+            )
+        """))
 
 
 ensure_chat_token_schema()
@@ -313,15 +327,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Commands:\n"
         "/start - start receiving TG\n"
-        "/set_wallet <address> - link your wallet once, receive from every chat you join\n"
+        "/set_wallet <address> - link your wallet (claims any pending rewards)\n"
+        "/wallet - show your linked wallet and explorer link\n"
+        "/balance - show TG, all chat tokens, and pending rewards\n"
+        "/token - show this chat's reward token (group only)\n"
         "/stop - stop receiving\n"
-        "/balance - check balance\n"
         "/create_token <name> <interval> - (admins) create a chat reward token\n"
         "   e.g. /create_token MyChatToken 1h\n"
         "/set_rewards_interval <interval> - (admins) change payout interval\n"
         "/reward_now - (admins) trigger an extra payout right now\n"
         "/github <username> <address> - link GitHub for GITHUB token airdrop\n"
-        "/website - project website"
+        "/website - project website\n\n"
+        "You can chat in groups without a wallet -- rewards will be saved as "
+        "pending and minted in one go when you /set_wallet."
     )
 
 
@@ -735,6 +753,104 @@ async def reward_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+CHAT_TOKEN_MINT_ABI = [{
+    "inputs": [
+        {"name": "to", "type": "address"},
+        {"name": "amount", "type": "uint256"},
+    ],
+    "name": "mint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function",
+}]
+
+
+def _claim_pending_rewards(user_id: int, address: str):
+    """Mint everything in pending_rewards for this user, one tx per chat token.
+
+    Returns (claimed, failed, total_amount_by_symbol_dict).
+    Rows are deleted only on successful mint to keep retries safe.
+    """
+    if not DEPLOYER_PK:
+        logger.warning("claim_pending: DEPLOYER_PK not set, skipping")
+        return 0, 0, {}
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT p.chat_id, p.amount, t.symbol, t.token_address
+                FROM pending_rewards p
+                JOIN chat_tokens t ON t.chat_id = p.chat_id
+                WHERE p.user_id = :u
+                  AND CAST(p.amount AS INTEGER) > 0
+                  AND t.token_address IS NOT NULL
+            """),
+            {"u": user_id},
+        ).fetchall()
+
+    if not rows:
+        return 0, 0, {}
+
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    acct = w3.eth.account.from_key(DEPLOYER_PK)
+    to = Web3.to_checksum_address(address)
+    nonce = w3.eth.get_transaction_count(acct.address, "pending")
+
+    claimed = 0
+    failed = 0
+    totals: dict = {}
+
+    for chat_id, amount_str, symbol, token_address in rows:
+        try:
+            amount = int(amount_str)
+            if amount <= 0:
+                continue
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(token_address),
+                abi=CHAT_TOKEN_MINT_ABI,
+            )
+            tx = contract.functions.mint(to, amount).build_transaction({
+                "from": acct.address,
+                "nonce": nonce,
+                "gas": 200_000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": CHAIN_ID,
+            })
+            signed = acct.sign_transaction(tx)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+            nonce += 1
+            if receipt.status != 1:
+                failed += 1
+                logger.error(
+                    "claim_pending: tx reverted user=%s chat=%s symbol=%s tx=%s",
+                    user_id, chat_id, symbol, tx_hash.hex(),
+                )
+                continue
+
+            with engine.begin() as conn:
+                conn.execute(
+                    text("DELETE FROM pending_rewards WHERE chat_id = :c AND user_id = :u"),
+                    {"c": chat_id, "u": user_id},
+                )
+            claimed += 1
+            totals[symbol] = totals.get(symbol, 0) + amount
+            logger.info(
+                "claim_pending: minted %s %s to %s user=%s chat=%s tx=%s",
+                amount, symbol, address, user_id, chat_id, tx_hash.hex(),
+            )
+        except Exception as e:
+            failed += 1
+            logger.error(
+                "claim_pending: mint failed user=%s chat=%s symbol=%s: %s",
+                user_id, chat_id, symbol, e,
+            )
+            # Bump nonce defensively in case the tx was actually broadcast.
+            nonce += 1
+
+    return claimed, failed, totals
+
+
 async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -758,15 +874,62 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 """),
                 {"user_id": user_id, "address": address},
             )
+    except Exception as e:
+        logger.error(f"Error in set_wallet: {e}")
+        await update.message.reply_text("Error saving address. Try again.")
+        return
 
+    # Check whether anything is owed before we promise a mint.
+    with engine.connect() as conn:
+        pending_count = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM pending_rewards p
+                JOIN chat_tokens t ON t.chat_id = p.chat_id
+                WHERE p.user_id = :u
+                  AND CAST(p.amount AS INTEGER) > 0
+                  AND t.token_address IS NOT NULL
+            """),
+            {"u": user_id},
+        ).scalar() or 0
+
+    if pending_count == 0:
         await update.message.reply_text(
             f"Wallet saved: {address}\n"
             "You will receive rewards from every chat token in groups you participate in, "
             "and 1 TG every hour from the global airdrop."
         )
+        return
+
+    status_msg = await update.message.reply_text(
+        f"Wallet saved: {address}\n"
+        f"Claiming pending rewards from {pending_count} chat(s)..."
+    )
+    try:
+        claimed, failed, totals = _claim_pending_rewards(user_id, address)
     except Exception as e:
-        logger.error(f"Error in set_wallet: {e}")
-        await update.message.reply_text("Error saving address. Try again.")
+        logger.error(f"set_wallet claim failed: {e}")
+        await status_msg.edit_text(
+            f"Wallet saved: {address}\n"
+            "Could not claim pending rewards automatically. They are safe in the database "
+            "and will be retried later."
+        )
+        return
+
+    if not totals:
+        await status_msg.edit_text(
+            f"Wallet saved: {address}\n"
+            f"Claim attempted but nothing succeeded ({failed} failed). Will retry later."
+        )
+        return
+
+    lines = [f"Wallet saved: {address}", "Claimed pending rewards:"]
+    for symbol, total in totals.items():
+        human = total / 10**18
+        lines.append(f"  {human:g} {symbol}")
+    if failed:
+        lines.append(f"({failed} chat(s) failed and will retry later)")
+    await status_msg.edit_text("\n".join(lines))
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -786,34 +949,142 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error removing you from list.")
 
 
+BALANCE_OF_ABI = [{
+    "inputs": [{"name": "account", "type": "address"}],
+    "name": "balanceOf",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function",
+}]
+
+
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from web3 import Web3
-
+    """Show: linked wallet, global TG balance, every chat-token balance the user
+    is eligible for, and any pending (claimable on /set_wallet) amounts."""
     user_id = update.effective_user.id
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT address FROM tg_wallets WHERE user_id = :u"),
+            {"u": user_id},
+        ).fetchone()
+        # Chat tokens this user is a member of (regardless of wallet status).
+        chat_tokens = conn.execute(
+            text("""
+                SELECT t.chat_id, t.name, t.symbol, t.token_address
+                FROM chat_members cm
+                JOIN chat_tokens t ON t.chat_id = cm.chat_id
+                WHERE cm.user_id = :u
+                  AND t.token_address IS NOT NULL
+            """),
+            {"u": user_id},
+        ).fetchall()
+        pending = conn.execute(
+            text("""
+                SELECT t.symbol, p.amount
+                FROM pending_rewards p
+                JOIN chat_tokens t ON t.chat_id = p.chat_id
+                WHERE p.user_id = :u
+                  AND CAST(p.amount AS INTEGER) > 0
+            """),
+            {"u": user_id},
+        ).fetchall()
+
+    address = row[0] if row else None
+    lines = []
+
+    if address:
+        lines.append(f"Wallet: {address}")
+    else:
+        lines.append("Wallet: not set -- use /set_wallet <address> to claim pending rewards.")
+
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT address FROM tg_wallets WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            ).fetchone()
-
-        if not result:
-            await update.message.reply_text("You are not registered. Use /set_wallet <address>.")
-            return
-
-        address = result[0]
-
         w3 = Web3(Web3.HTTPProvider(RPC_URL))
-        contract = w3.eth.contract(address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI)
+        if address:
+            checksum = Web3.to_checksum_address(address)
+            tg_contract = w3.eth.contract(
+                address=Web3.to_checksum_address(TOKEN_ADDRESS), abi=TOKEN_ABI
+            )
+            tg_balance = tg_contract.functions.balanceOf(checksum).call() / 10**18
+            lines.append(f"TG (global): {tg_balance:g}")
 
-        balance = contract.functions.balanceOf(Web3.to_checksum_address(address)).call()
-        decimals = 18
-        balance_tg = balance / (10**decimals)
-
-        await update.message.reply_text(f"Balance {address[:6]}...{address[-4:]}: {balance_tg} TG")
+            if chat_tokens:
+                lines.append("")
+                lines.append("Chat token balances:")
+                for _cid, _name, symbol, token_address in chat_tokens:
+                    try:
+                        c = w3.eth.contract(
+                            address=Web3.to_checksum_address(token_address),
+                            abi=BALANCE_OF_ABI,
+                        )
+                        bal = c.functions.balanceOf(checksum).call() / 10**18
+                        lines.append(f"  {symbol}: {bal:g}")
+                    except Exception as e:
+                        logger.debug(f"balance read failed for {symbol}: {e}")
+                        lines.append(f"  {symbol}: (read error)")
     except Exception as e:
-        logger.error(f"Error in balance: {e}")
-        await update.message.reply_text("Error fetching balance. Try again later.")
+        logger.error(f"Error in balance on-chain read: {e}")
+        lines.append("(on-chain read failed, try again later)")
+
+    if pending:
+        lines.append("")
+        lines.append("Pending (claim by setting a wallet):")
+        for symbol, amount_str in pending:
+            human = int(amount_str) / 10**18
+            lines.append(f"  {human:g} {symbol}")
+
+    await update.message.reply_text("\n".join(lines))
+
+
+async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the user's linked wallet address and a link to it on the explorer."""
+    user_id = update.effective_user.id
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT address FROM tg_wallets WHERE user_id = :u"),
+            {"u": user_id},
+        ).fetchone()
+    if not row:
+        await update.message.reply_text(
+            "No wallet linked yet. Use /set_wallet <address> to link one."
+        )
+        return
+    address = row[0]
+    await update.message.reply_text(
+        f"Wallet: {address}\n{EXPLORER_URL}/address/{address}"
+    )
+
+
+async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show this chat's reward token details and an explorer link."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+    if chat.type not in ("group", "supergroup"):
+        await update.message.reply_text(
+            "Use this command inside the group chat whose token you want to inspect."
+        )
+        return
+    chat_token = get_chat_token(chat.id)
+    if chat_token is None:
+        await update.message.reply_text(
+            "This chat has no reward token. The chat owner can create one with "
+            "/create_token <name> <interval>."
+        )
+        return
+    _cid, name, symbol, token_address, interval, _reward = chat_token
+    if not token_address:
+        await update.message.reply_text(
+            f"Token {name} ({symbol}) is still being deployed. Try again shortly."
+        )
+        return
+    await update.message.reply_text(
+        f"Name: {name}\n"
+        f"Symbol: {symbol}\n"
+        f"Address: {token_address}\n"
+        f"Rewards interval: {format_interval(interval)}\n"
+        f"{EXPLORER_URL}/address/{token_address}"
+    )
 
 
 async def track_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -899,9 +1170,11 @@ async def post_init(application: Application):
         [
             BotCommand("start", "Start receiving TG"),
             BotCommand("help", "Show available commands"),
-            BotCommand("set_wallet", "Set your wallet address"),
+            BotCommand("set_wallet", "Link wallet and claim pending rewards"),
+            BotCommand("wallet", "Show your linked wallet"),
+            BotCommand("balance", "Show TG, chat tokens, and pending rewards"),
+            BotCommand("token", "Show this chat's reward token"),
             BotCommand("stop", "Stop receiving TG"),
-            BotCommand("balance", "Check your TG balance"),
             BotCommand("github", "Link GitHub for GITHUB airdrop"),
             BotCommand("website", "Open the project website"),
             BotCommand("create_token", "(admins) Create a chat reward token"),
@@ -935,8 +1208,10 @@ def run_dispatcher():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("set_wallet", set_wallet_command))
+    application.add_handler(CommandHandler("wallet", wallet_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("balance", balance_command))
+    application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("github", github_command))
     application.add_handler(CommandHandler("website", website_command))
     application.add_handler(CommandHandler("create_token", create_token_command))
