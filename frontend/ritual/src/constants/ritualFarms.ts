@@ -47,5 +47,40 @@ export const RITUAL_FARM_POOLS: { [chainId: number]: RitualFarmPool[] } = {
       description: 'Stake LP from the ASH/WCYBER pair',
       isSolo: false,
     },
+    {
+      pid: 2,
+      lpToken: '0x7DcDa19Cf984ca708E5fA228AC148e7d82D508BA', // CYBER.sol
+      label: 'CYBER.sol',
+      description: 'Stake CYBER.sol directly',
+      isSolo: true,
+    },
+    {
+      pid: 3,
+      lpToken: '0x7D8e23e33c6680D5C45CA2deb8A85CcA0fe283F4', // CYBER.sol/CYBER LP
+      label: 'CYBER.sol / CYBER LP',
+      description: 'Stake LP from the CYBER.sol/CYBER pair',
+      isSolo: false,
+    },
+    {
+      pid: 4,
+      lpToken: '0x4491A41C7D75c15cEbC7a321e392fcD57ADeABe8', // USDT/USDC LP
+      label: 'USDT / USDC LP',
+      description: 'Stake LP from the USDT/USDC pair',
+      isSolo: false,
+    },
+    {
+      pid: 5,
+      lpToken: '0x07b935a3Ba330Cb3Bd56B43F1032b57d3Ae0e04f', // CYBER/USDT LP
+      label: 'CYBER / USDT LP',
+      description: 'Stake LP from the CYBER/USDT pair',
+      isSolo: false,
+    },
+    {
+      pid: 6,
+      lpToken: '0x79B039b5E146E878683039D9387E212afc9FFC85', // CYBER/USDC LP
+      label: 'CYBER / USDC LP',
+      description: 'Stake LP from the CYBER/USDC pair',
+      isSolo: false,
+    },
   ],
 };
