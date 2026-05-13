@@ -565,9 +565,10 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if not args:
         context.user_data["awaiting_token_name"] = True
         context.user_data["awaiting_token_chat_id"] = chat.id
-        await update.message.reply_text(
-            "Send the token name now (1-48 characters), or /cancel to abort."
+        bot_msg = await update.message.reply_text(
+            "Reply to this message with the token name (1-48 characters), or /cancel to abort."
         )
+        context.user_data["awaiting_token_bot_msg_id"] = bot_msg.message_id
         return
 
     if len(args) == 1:
@@ -578,9 +579,10 @@ async def create_token_command(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["token_name"] = name
         context.user_data["awaiting_token_interval"] = True
         context.user_data["awaiting_token_chat_id"] = chat.id
-        await update.message.reply_text(
-            "Send the rewards interval now (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
+        bot_msg = await update.message.reply_text(
+            "Reply to this message with the rewards interval (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
         )
+        context.user_data["awaiting_token_bot_msg_id"] = bot_msg.message_id
         return
 
     # 2+ args: last token is always the interval
@@ -989,7 +991,7 @@ async def set_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel any pending interactive flow (/set_wallet or /create_token)."""
     cancelled = bool(context.user_data.pop("awaiting_wallet", None))
-    for key in ("awaiting_token_name", "awaiting_token_interval", "token_name", "awaiting_token_chat_id"):
+    for key in ("awaiting_token_name", "awaiting_token_interval", "token_name", "awaiting_token_chat_id", "awaiting_token_bot_msg_id"):
         if context.user_data.pop(key, None) is not None:
             cancelled = True
     await update.message.reply_text("Cancelled." if cancelled else "Nothing to cancel.")
@@ -1021,8 +1023,9 @@ async def pending_create_token_handler(update: Update, context: ContextTypes.DEF
     """Catch the next text message from a user who issued bare /create_token.
 
     Fires when `awaiting_token_name` or `awaiting_token_interval` is set in
-    the user's `user_data`.  The handler validates the chat matches the one
-    that started the flow to prevent cross-chat confusion.
+    the user's `user_data`.  Only processes messages that reply to the bot's
+    last prompt, so the handler works in both privacy mode and when the bot is
+    an admin, without hijacking casual group chat.
     """
     awaiting_name = context.user_data.get("awaiting_token_name")
     awaiting_interval = context.user_data.get("awaiting_token_interval")
@@ -1033,10 +1036,6 @@ async def pending_create_token_handler(update: Update, context: ContextTypes.DEF
     if chat is None or chat.id != context.user_data.get("awaiting_token_chat_id"):
         return
 
-    user = update.effective_user
-    if user is None:
-        return
-
     msg = update.effective_message
     if msg is None or not msg.text:
         return
@@ -1045,28 +1044,36 @@ async def pending_create_token_handler(update: Update, context: ContextTypes.DEF
     if text_value.startswith("/"):
         return
 
+    # Must be a reply to the bot's prompt message (handles privacy mode).
+    expected_bot_msg_id = context.user_data.get("awaiting_token_bot_msg_id")
+    if not msg.reply_to_message or msg.reply_to_message.message_id != expected_bot_msg_id:
+        return
+
     # Use the first line as the value so multi-line pastes don't confuse us.
     value = text_value.splitlines()[0].strip()
 
     if awaiting_name:
         context.user_data.pop("awaiting_token_name", None)
+        context.user_data.pop("awaiting_token_bot_msg_id", None)
         name = value
         if not name or len(name) > 48:
             context.user_data["awaiting_token_name"] = True
-            await update.message.reply_text(
-                "Token name must be 1..48 characters. Send it again, or /cancel to abort."
+            retry = await update.message.reply_text(
+                "Token name must be 1..48 characters. Reply to this message with the name, or /cancel to abort."
             )
+            context.user_data["awaiting_token_bot_msg_id"] = retry.message_id
             return
-        # Name looks OK -- ask for interval now.
         context.user_data["token_name"] = name
         context.user_data["awaiting_token_interval"] = True
-        await update.message.reply_text(
-            "Send the rewards interval now (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
+        bot_msg = await update.message.reply_text(
+            "Reply to this message with the rewards interval (e.g. 30s, 15m, 1h, 2d, 1w), or /cancel to abort."
         )
+        context.user_data["awaiting_token_bot_msg_id"] = bot_msg.message_id
         return
 
     if awaiting_interval:
         context.user_data.pop("awaiting_token_interval", None)
+        context.user_data.pop("awaiting_token_bot_msg_id", None)
         name = context.user_data.pop("token_name", None)
         if not name:
             context.user_data.pop("awaiting_token_chat_id", None)

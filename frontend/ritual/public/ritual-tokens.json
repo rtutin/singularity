@@ -45,6 +45,22 @@
       "decimals": 18,
       "chainId": 49406,
       "logoURI": "/CYBER.png"
+    },
+    {
+      "name": "USD Coin",
+      "address": "0xdc25597B19799010047F17e9591EFE08EFd40077",
+      "symbol": "USDC",
+      "decimals": 6,
+      "chainId": 49406,
+      "logoURI": "/usdc.svg"
+    },
+    {
+      "name": "Tether USD",
+      "address": "0x94845aF24a3E431593A2b941b2b31836dE45185D",
+      "symbol": "USDT",
+      "decimals": 6,
+      "chainId": 49406,
+      "logoURI": "/usdt.svg"
     }
   ]
 }
