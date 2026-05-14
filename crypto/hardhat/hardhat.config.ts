@@ -14,7 +14,7 @@ export default defineConfig({
     profiles: {
       default: {
         compilers: [
-          { version: "0.8.19" },
+          { version: "0.8.19", settings: { optimizer: { enabled: true, runs: 200 } } },
           {
             version: "0.6.6",
             settings: {
