@@ -1,8 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\BridgeController;
+use App\Http\Controllers\Api\BridgeEventController;
 use App\Http\Controllers\Api\SolanaWalletAuthController;
 use App\Http\Controllers\Api\WalletAuthController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 
@@ -20,9 +22,10 @@ Route::prefix('solana-wallet')->group(function () {
 
 // Bridge (public)
 Route::get('bridge/{bridgeRequest}/status', [BridgeController::class, 'status']);
+Route::post('bridge/events', [BridgeEventController::class, 'store'])->middleware('throttle:60,1');
 
 // Cyberia RPC proxy (avoids mixed content on HTTPS sites)
-Route::post('rpc/cyberia', function (\Illuminate\Http\Request $request) {
+Route::post('rpc/cyberia', function (Request $request) {
     $response = Http::post(config('services.ethereum.rpc_url', 'https://rpc.cyberia.church'), $request->all());
 
     return response($response->body(), $response->status())

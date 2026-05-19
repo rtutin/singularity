@@ -627,6 +627,13 @@ export const USDC: { [chainId: number]: Token } = {
     'USDC',
     'USDC',
   ),
+  [ChainId.CYBERIA]: new Token(
+    ChainId.CYBERIA,
+    '0xdc25597B19799010047F17e9591EFE08EFd40077',
+    6,
+    'USDC',
+    'USD Coin',
+  ),
 };
 
 export const USDCE: { [chainId: number]: Token } = {
@@ -740,6 +747,13 @@ export const USDT: { [chainId: number]: Token } = {
     18,
     'USDT',
     'USDT',
+  ),
+  [ChainId.CYBERIA]: new Token(
+    ChainId.CYBERIA,
+    '0x94845aF24a3E431593A2b941b2b31836dE45185D',
+    6,
+    'USDT',
+    'Tether USD',
   ),
 };
 
@@ -1580,6 +1594,8 @@ export const V2_BASES_TO_CHECK_TRADES_AGAINST: {
   [ChainId.CYBERIA]: [
     WETH[ChainId.CYBERIA],
     NEW_QUICK[ChainId.CYBERIA],
+    USDC[ChainId.CYBERIA],
+    USDT[ChainId.CYBERIA],
   ],
 };
 
@@ -1779,6 +1795,12 @@ export const V2_BASES_TO_TRACK_LIQUIDITY_FOR: {
     USDO[ChainId.DOGECHAIN],
     DC[ChainId.DOGECHAIN],
     DD[ChainId.DOGECHAIN],
+  ],
+  [ChainId.CYBERIA]: [
+    WETH[ChainId.CYBERIA],
+    NEW_QUICK[ChainId.CYBERIA],
+    USDC[ChainId.CYBERIA],
+    USDT[ChainId.CYBERIA],
   ],
 };
 

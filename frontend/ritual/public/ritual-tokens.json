@@ -61,6 +61,30 @@
       "decimals": 6,
       "chainId": 49406,
       "logoURI": "/usdt.svg"
+    },
+    {
+      "name": "Bitcoin",
+      "address": "0x9332081f308BC978fe259237850fA253131b46Fa",
+      "symbol": "BTC",
+      "decimals": 8,
+      "chainId": 49406,
+      "logoURI": "/btc.svg"
+    },
+    {
+      "name": "Litecoin",
+      "address": "0x001AFD19C9d890b0cf0fcd6D654f9BFe4f264F14",
+      "symbol": "LTC",
+      "decimals": 8,
+      "chainId": 49406,
+      "logoURI": "/ltc.svg"
+    },
+    {
+      "name": "Solana",
+      "address": "0x53450B1d205f1e41d10B653FBBDEa74160dafFf4",
+      "symbol": "SOL",
+      "decimals": 9,
+      "chainId": 49406,
+      "logoURI": "/sol.svg"
     }
   ]
 }

@@ -70,7 +70,7 @@ export default defineConfig({
     },
     cyberia: {
       type: "http",
-      url: "http://195.166.164.94:8545",
+      url: "https://rpc.cyberia.church",
       chainId: 49406,
       accounts: [DEPLOYER_PK],
     },

@@ -13,7 +13,9 @@ import {
     Network,
 } from 'lucide-vue-next';
 import { computed, onMounted, ref, watch } from 'vue';
+import BridgeWizard from '@/components/bridge/BridgeWizard.vue';
 import { useBridge } from '@/composables/useBridge';
+import { useBridgeAnalytics } from '@/composables/useBridgeAnalytics';
 import { useSolanaWallet } from '@/composables/useSolanaWallet';
 import { useWallet } from '@/composables/useWallet';
 import { useWalletAuth } from '@/composables/useWalletAuth';
@@ -33,7 +35,7 @@ type BridgeHistoryItem = {
     completed_at: string | null;
 };
 
-withDefaults(
+const props = withDefaults(
     defineProps<{
         canRegister?: boolean;
         price?: {
@@ -41,11 +43,19 @@ withDefaults(
             priceUsd: number;
         } | null;
         bridgeHistory?: BridgeHistoryItem[];
+        useNewUx?: boolean;
+        bridgeRelayerEvm?: string | null;
+        bridgeFeeConfig?: { flatUsd: number; rateBps: number };
+        bridgeGasDrop?: { enabled: boolean; amount: string };
     }>(),
     {
         canRegister: true,
         price: null,
         bridgeHistory: () => [],
+        useNewUx: true,
+        bridgeRelayerEvm: null,
+        bridgeFeeConfig: () => ({ flatUsd: 0.1, rateBps: 0 }),
+        bridgeGasDrop: () => ({ enabled: true, amount: '0.01' }),
     },
 );
 
@@ -54,6 +64,7 @@ const evmWallet = useWallet();
 const solanaWallet = useSolanaWallet();
 const walletAuth = useWalletAuth();
 const bridge = useBridge();
+const analytics = useBridgeAnalytics();
 
 const feedbackError = ref<string | null>(null);
 const feedbackSuccess = ref<string | null>(null);
@@ -172,6 +183,7 @@ const refreshBalances = async () => {
 onMounted(() => {
     evmWallet.restore(user.value?.wallet_address);
     solanaWallet.restore(user.value?.solana_wallet_address);
+    analytics.track('page_view');
 });
 
 // Fetch balances when wallets connect
@@ -198,6 +210,27 @@ watch(
 const flipDirection = () => {
     bridgeDirection.value =
         bridgeDirection.value === 'sol_to_evm' ? 'evm_to_sol' : 'sol_to_evm';
+    analytics.track('direction_selected', { direction: bridgeDirection.value });
+};
+
+const handleAmountBlur = () => {
+    const amt = parseFloat(bridgeAmount.value);
+
+    if (amt > 0) {
+        analytics.track('amount_entered', {
+            direction: bridgeDirection.value,
+            amount: bridgeAmount.value,
+        });
+    }
+};
+
+const handleAddressBlur = () => {
+    if (bridgeAddress.value.trim().length > 0) {
+        analytics.track('destination_entered', {
+            direction: bridgeDirection.value,
+            destination_address: bridgeAddress.value.trim(),
+        });
+    }
 };
 
 const setMaxAmount = () => {
@@ -239,39 +272,72 @@ const handleBridgeSubmit = async () => {
         let senderAddress: string;
         let recipientAddress: string;
 
-        if (bridgeDirection.value === 'evm_to_sol') {
-            // EVM -> Solana: burn CYBER.sol on EVM to redeem on Solana
-            senderAddress = evmWallet.address.value!;
-            recipientAddress = solanaWallet.address.value!;
+        analytics.track('lock_tx_submitted', {
+            direction: bridgeDirection.value,
+            amount: bridgeAmount.value,
+        });
 
-            const result = await bridge.redeemCyberSolOnEvm(
-                bridgeAmount.value,
-                recipientAddress,
-            );
+        try {
+            if (bridgeDirection.value === 'evm_to_sol') {
+                // EVM -> Solana: burn CYBER.sol on EVM to redeem on Solana
+                senderAddress = evmWallet.address.value!;
+                recipientAddress = solanaWallet.address.value!;
 
-            if (!result) {
-                throw new Error('Transaction cancelled');
+                const result = await bridge.redeemCyberSolOnEvm(
+                    bridgeAmount.value,
+                    recipientAddress,
+                );
+
+                if (!result) {
+                    throw new Error('Transaction cancelled');
+                }
+
+                txHash = result.txHash;
+                nonce = result.nonce;
+            } else {
+                // Solana -> EVM: lock CYBER.sol SPL tokens on Solana bridge
+                senderAddress = solanaWallet.address.value!;
+                recipientAddress = evmWallet.address.value!;
+
+                const result = await bridge.lockNativeOnSolana(
+                    bridgeAmount.value,
+                    recipientAddress,
+                );
+
+                if (!result) {
+                    throw new Error('Transaction cancelled');
+                }
+
+                txHash = result.txHash;
+                nonce = result.nonce;
             }
+        } catch (lockErr) {
+            const message =
+                lockErr instanceof Error ? lockErr.message : 'Lock tx rejected';
 
-            txHash = result.txHash;
-            nonce = result.nonce;
-        } else {
-            // Solana -> EVM: lock CYBER.sol SPL tokens on Solana bridge
-            senderAddress = solanaWallet.address.value!;
-            recipientAddress = evmWallet.address.value!;
+            analytics.track('lock_tx_rejected', {
+                direction: bridgeDirection.value,
+                amount: bridgeAmount.value,
+                error_message: message,
+            });
 
-            const result = await bridge.lockNativeOnSolana(
-                bridgeAmount.value,
-                recipientAddress,
-            );
-
-            if (!result) {
-                throw new Error('Transaction cancelled');
-            }
-
-            txHash = result.txHash;
-            nonce = result.nonce;
+            throw lockErr;
         }
+
+        analytics.track('lock_tx_confirmed', {
+            direction: bridgeDirection.value,
+            amount: bridgeAmount.value,
+            source_address: senderAddress,
+            destination_address: recipientAddress,
+            metadata: { tx_hash: txHash, nonce },
+        });
+
+        analytics.track('bridge_submitted', {
+            direction: bridgeDirection.value,
+            amount: bridgeAmount.value,
+            source_address: senderAddress,
+            destination_address: recipientAddress,
+        });
 
         // Submit bridge request to backend relayer
         const csrfToken = document.cookie.match(/XSRF-TOKEN=([^;]+)/)?.[1];
@@ -290,12 +356,18 @@ const handleBridgeSubmit = async () => {
                 sender_address: senderAddress,
                 recipient_address: recipientAddress,
                 amount: bridgeAmount.value,
+                session_id: analytics.sessionId,
             }),
         });
 
         const data = await response.json();
 
         if (!response.ok) {
+            analytics.track('bridge_submit_failed', {
+                direction: bridgeDirection.value,
+                error_message: data.message || `HTTP ${response.status}`,
+            });
+
             throw new Error(
                 data.message || 'Failed to register bridge request',
             );
@@ -334,6 +406,8 @@ const handleEvmConnect = async () => {
         return;
     }
 
+    analytics.track('evm_wallet_connected', { source_address: address });
+
     try {
         if (isAuthenticated.value) {
             const { nonce } = await walletAuth.generateNonce(address);
@@ -363,6 +437,8 @@ const handleSolanaConnect = async () => {
     if (!address) {
         return;
     }
+
+    analytics.track('solana_wallet_connected', { source_address: address });
 
     try {
         if (isAuthenticated.value) {
@@ -459,6 +535,7 @@ const handleCyberiaRpcConnect = async () => {
                         },
                         rpcUrls: [CYBERIA_RPC],
                         blockExplorerUrls: ['https://explorer.cyberia.church'],
+                        iconUrls: ['https://swap.cyberia.church/CYBER.png'],
                     },
                 ],
             });
@@ -630,311 +707,337 @@ const statusColor = (status: string) => {
                 {{ feedbackSuccess }}
             </div>
 
-            <!-- Wallets -->
-            <div class="flex w-full gap-3">
-                <!-- EVM Wallet -->
-                <div
-                    class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
-                >
-                    <Wallet
-                        class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
-                    />
-                    <div class="min-w-0 flex-1">
-                        <p
-                            class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
-                        >
-                            Metamask (EVM)
-                        </p>
-                        <p
-                            v-if="
-                                evmWallet.isConnected.value &&
-                                evmWallet.address.value
-                            "
-                            class="truncate font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
-                        >
-                            {{
-                                evmWallet.formatAddress(evmWallet.address.value)
-                            }}
-                        </p>
-                        <p
-                            v-if="
-                                evmWallet.isConnected.value &&
-                                evmCyberSolDisplay
-                            "
-                            class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
-                        >
-                            {{ evmCyberSolDisplay }} CYBER.sol
-                        </p>
-                    </div>
-                    <button
-                        v-if="
-                            evmWallet.isConnected.value &&
-                            isAuthenticated &&
-                            user?.wallet_address
-                        "
-                        class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
-                        @click="handleEvmDetach"
-                    >
-                        <Unplug class="h-3 w-3" />
-                    </button>
-                    <button
-                        v-else-if="evmWallet.isConnected.value"
-                        class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
-                        @click="evmWallet.disconnect()"
-                    >
-                        <Unplug class="h-3 w-3" />
-                    </button>
-                    <button
-                        v-if="!evmWallet.isConnected.value"
-                        class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
-                        :disabled="evmWallet.isConnecting.value"
-                        @click="handleEvmConnect"
-                    >
-                        {{ evmWallet.isConnecting.value ? '...' : 'Connect' }}
-                    </button>
-                </div>
+            <BridgeWizard
+                v-if="props.useNewUx"
+                :relayer-evm-address="props.bridgeRelayerEvm"
+                :cyber-sol-usd="
+                    props.price ? Number(props.price.priceUsd) : null
+                "
+                :fee-config="props.bridgeFeeConfig"
+                :gas-drop-config="props.bridgeGasDrop"
+            />
 
-                <!-- Solana Wallet -->
-                <div
-                    class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
-                >
-                    <Wallet
-                        class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
-                    />
-                    <div class="min-w-0 flex-1">
-                        <p
-                            class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
-                        >
-                            Phantom (Solana)
-                        </p>
-                        <p
-                            v-if="
-                                solanaWallet.isConnected.value &&
-                                solanaWallet.address.value
-                            "
-                            class="truncate font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
-                        >
-                            {{
-                                solanaWallet.formatAddress(
-                                    solanaWallet.address.value,
-                                )
-                            }}
-                        </p>
-                        <p
-                            v-if="
-                                solanaWallet.isConnected.value &&
-                                solCyberSolDisplay
-                            "
-                            class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
-                        >
-                            {{ solCyberSolDisplay }} CYBER.sol
-                        </p>
-                    </div>
-                    <button
-                        v-if="
-                            solanaWallet.isConnected.value &&
-                            isAuthenticated &&
-                            user?.solana_wallet_address
-                        "
-                        class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
-                        @click="handleSolanaDetach"
+            <template v-else>
+                <!-- Wallets -->
+                <div class="flex w-full gap-3">
+                    <!-- EVM Wallet -->
+                    <div
+                        class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
                     >
-                        <Unplug class="h-3 w-3" />
-                    </button>
-                    <button
-                        v-else-if="solanaWallet.isConnected.value"
-                        class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
-                        @click="solanaWallet.disconnect()"
-                    >
-                        <Unplug class="h-3 w-3" />
-                    </button>
-                    <button
-                        v-if="!solanaWallet.isConnected.value"
-                        class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
-                        :disabled="solanaWallet.isConnecting.value"
-                        @click="handleSolanaConnect"
-                    >
-                        {{
-                            solanaWallet.isConnecting.value ? '...' : 'Connect'
-                        }}
-                    </button>
-                </div>
-            </div>
-
-            <div
-                class="w-full rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
-            >
-                <label
-                    for="bridge-address"
-                    class="mb-1 block text-xs text-[#706f6c] dark:text-[#A1A09A]"
-                >
-                    {{ destLabel }} address
-                </label>
-                <input
-                    id="bridge-address"
-                    v-model="bridgeAddress"
-                    type="text"
-                    :placeholder="destAddressPlaceholder"
-                    class="w-full rounded border border-[#19140020] bg-[#FDFDFC] px-3 py-2 font-mono text-xs text-[#1b1b18] outline-none placeholder:text-[#c4c4c0] focus:border-[#1915014a] dark:border-[#3E3E3A] dark:bg-[#0a0a0a] dark:text-[#EDEDEC] dark:placeholder:text-[#555] dark:focus:border-[#62605b]"
-                />
-            </div>
-
-            <!-- Bridge Card -->
-            <div
-                class="w-full rounded-xl border border-[#19140035] p-5 dark:border-[#3E3E3A]"
-            >
-                <div class="mb-4 flex items-center gap-2">
-                    <ArrowRightLeft
-                        class="h-5 w-5 text-[#1b1b18] dark:text-[#EDEDEC]"
-                    />
-                    <h2
-                        class="text-lg font-semibold text-[#1b1b18] dark:text-[#EDEDEC]"
-                    >
-                        Bridge
-                    </h2>
-                </div>
-
-                <!-- Source -->
-                <div class="rounded-lg bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]">
-                    <div class="mb-2 flex items-center justify-between">
-                        <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
-                            >From</span
-                        >
-                        <div class="flex items-center gap-2">
-                            <span
-                                v-if="sourceBalance !== null"
-                                class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                        <Wallet
+                            class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
+                        />
+                        <div class="min-w-0 flex-1">
+                            <p
+                                class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
                             >
-                                Balance:
-                                <span class="font-mono">{{
-                                    parseFloat(sourceBalance).toFixed(4)
-                                }}</span>
-                            </span>
-                            <button
+                                Metamask (EVM)
+                            </p>
+                            <p
                                 v-if="
-                                    sourceBalance !== null &&
-                                    parseFloat(sourceBalance) > 0
+                                    evmWallet.isConnected.value &&
+                                    evmWallet.address.value
                                 "
-                                class="rounded bg-[#19140010] px-1.5 py-0.5 text-[10px] font-medium text-[#1b1b18] hover:bg-[#19140020] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
-                                @click="setMaxAmount"
+                                class="truncate font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
                             >
-                                MAX
-                            </button>
+                                {{
+                                    evmWallet.formatAddress(
+                                        evmWallet.address.value,
+                                    )
+                                }}
+                            </p>
+                            <p
+                                v-if="
+                                    evmWallet.isConnected.value &&
+                                    evmCyberSolDisplay
+                                "
+                                class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                            >
+                                {{ evmCyberSolDisplay }} CYBER.sol
+                            </p>
+                        </div>
+                        <button
+                            v-if="
+                                evmWallet.isConnected.value &&
+                                isAuthenticated &&
+                                user?.wallet_address
+                            "
+                            class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
+                            @click="handleEvmDetach"
+                        >
+                            <Unplug class="h-3 w-3" />
+                        </button>
+                        <button
+                            v-else-if="evmWallet.isConnected.value"
+                            class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
+                            @click="evmWallet.disconnect()"
+                        >
+                            <Unplug class="h-3 w-3" />
+                        </button>
+                        <button
+                            v-if="!evmWallet.isConnected.value"
+                            class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
+                            :disabled="evmWallet.isConnecting.value"
+                            @click="handleEvmConnect"
+                        >
+                            {{
+                                evmWallet.isConnecting.value ? '...' : 'Connect'
+                            }}
+                        </button>
+                    </div>
+
+                    <!-- Solana Wallet -->
+                    <div
+                        class="flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
+                    >
+                        <Wallet
+                            class="h-4 w-4 shrink-0 text-[#1b1b18] dark:text-[#EDEDEC]"
+                        />
+                        <div class="min-w-0 flex-1">
+                            <p
+                                class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
+                            >
+                                Phantom (Solana)
+                            </p>
+                            <p
+                                v-if="
+                                    solanaWallet.isConnected.value &&
+                                    solanaWallet.address.value
+                                "
+                                class="truncate font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                            >
+                                {{
+                                    solanaWallet.formatAddress(
+                                        solanaWallet.address.value,
+                                    )
+                                }}
+                            </p>
+                            <p
+                                v-if="
+                                    solanaWallet.isConnected.value &&
+                                    solCyberSolDisplay
+                                "
+                                class="mt-0.5 font-mono text-[10px] text-[#706f6c] dark:text-[#A1A09A]"
+                            >
+                                {{ solCyberSolDisplay }} CYBER.sol
+                            </p>
+                        </div>
+                        <button
+                            v-if="
+                                solanaWallet.isConnected.value &&
+                                isAuthenticated &&
+                                user?.solana_wallet_address
+                            "
+                            class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
+                            @click="handleSolanaDetach"
+                        >
+                            <Unplug class="h-3 w-3" />
+                        </button>
+                        <button
+                            v-else-if="solanaWallet.isConnected.value"
+                            class="shrink-0 rounded p-1 text-red-500 hover:bg-red-500/10"
+                            @click="solanaWallet.disconnect()"
+                        >
+                            <Unplug class="h-3 w-3" />
+                        </button>
+                        <button
+                            v-if="!solanaWallet.isConnected.value"
+                            class="w-full shrink-0 rounded border border-[#19140035] px-2 py-1 text-xs text-[#1b1b18] hover:border-[#1915014a] disabled:opacity-50 sm:w-auto dark:border-[#3E3E3A] dark:text-[#EDEDEC]"
+                            :disabled="solanaWallet.isConnecting.value"
+                            @click="handleSolanaConnect"
+                        >
+                            {{
+                                solanaWallet.isConnecting.value
+                                    ? '...'
+                                    : 'Connect'
+                            }}
+                        </button>
+                    </div>
+                </div>
+
+                <div
+                    class="w-full rounded-lg border border-[#19140035] p-3 dark:border-[#3E3E3A]"
+                >
+                    <label
+                        for="bridge-address"
+                        class="mb-1 block text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                    >
+                        {{ destLabel }} address
+                    </label>
+                    <input
+                        id="bridge-address"
+                        v-model="bridgeAddress"
+                        type="text"
+                        :placeholder="destAddressPlaceholder"
+                        class="w-full rounded border border-[#19140020] bg-[#FDFDFC] px-3 py-2 font-mono text-xs text-[#1b1b18] outline-none placeholder:text-[#c4c4c0] focus:border-[#1915014a] dark:border-[#3E3E3A] dark:bg-[#0a0a0a] dark:text-[#EDEDEC] dark:placeholder:text-[#555] dark:focus:border-[#62605b]"
+                        @blur="handleAddressBlur"
+                    />
+                </div>
+
+                <!-- Bridge Card -->
+                <div
+                    class="w-full rounded-xl border border-[#19140035] p-5 dark:border-[#3E3E3A]"
+                >
+                    <div class="mb-4 flex items-center gap-2">
+                        <ArrowRightLeft
+                            class="h-5 w-5 text-[#1b1b18] dark:text-[#EDEDEC]"
+                        />
+                        <h2
+                            class="text-lg font-semibold text-[#1b1b18] dark:text-[#EDEDEC]"
+                        >
+                            Bridge
+                        </h2>
+                    </div>
+
+                    <!-- Source -->
+                    <div class="rounded-lg bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]">
+                        <div class="mb-2 flex items-center justify-between">
+                            <span
+                                class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                                >From</span
+                            >
+                            <div class="flex items-center gap-2">
+                                <span
+                                    v-if="sourceBalance !== null"
+                                    class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                                >
+                                    Balance:
+                                    <span class="font-mono">{{
+                                        parseFloat(sourceBalance).toFixed(4)
+                                    }}</span>
+                                </span>
+                                <button
+                                    v-if="
+                                        sourceBalance !== null &&
+                                        parseFloat(sourceBalance) > 0
+                                    "
+                                    class="rounded bg-[#19140010] px-1.5 py-0.5 text-[10px] font-medium text-[#1b1b18] hover:bg-[#19140020] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
+                                    @click="setMaxAmount"
+                                >
+                                    MAX
+                                </button>
+                                <span
+                                    class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
+                                >
+                                    {{ sourceLabel }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <input
+                                v-model="bridgeAmount"
+                                type="text"
+                                inputmode="decimal"
+                                placeholder="0.0"
+                                class="w-full bg-transparent text-2xl font-light text-[#1b1b18] outline-none placeholder:text-[#c4c4c0] dark:text-[#EDEDEC] dark:placeholder:text-[#555]"
+                                :class="{
+                                    'text-red-500 dark:text-red-400':
+                                        amountExceedsBalance,
+                                }"
+                                @blur="handleAmountBlur"
+                            />
+                            <span
+                                class="shrink-0 rounded-full bg-[#19140010] px-3 py-1 text-xs font-medium text-[#1b1b18] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
+                            >
+                                {{ sourceTokenLabel }}
+                            </span>
+                        </div>
+                        <p
+                            v-if="amountExceedsBalance"
+                            class="mt-1 text-xs text-red-500 dark:text-red-400"
+                        >
+                            Insufficient balance
+                        </p>
+                    </div>
+
+                    <!-- Flip button -->
+                    <div class="relative z-10 -my-2 flex justify-center">
+                        <button
+                            class="rounded-full border border-[#19140035] bg-[#FDFDFC] p-2 transition-transform hover:rotate-180 dark:border-[#3E3E3A] dark:bg-[#0a0a0a]"
+                            @click="flipDirection"
+                        >
+                            <ArrowDown
+                                class="h-4 w-4 text-[#1b1b18] dark:text-[#EDEDEC]"
+                            />
+                        </button>
+                    </div>
+
+                    <!-- Destination -->
+                    <div
+                        class="bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]"
+                        :class="bridgeFee ? 'rounded-t-lg' : 'rounded-lg'"
+                    >
+                        <div class="mb-2 flex items-center justify-between">
+                            <span
+                                class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                                >To</span
+                            >
                             <span
                                 class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
                             >
-                                {{ sourceLabel }}
+                                {{ destLabel }}
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="text-2xl font-light text-[#1b1b18] dark:text-[#EDEDEC]"
+                            >
+                                {{ amountAfterFee ?? '0.0' }}
+                            </span>
+                            <span
+                                class="shrink-0 rounded-full bg-[#19140010] px-3 py-1 text-xs font-medium text-[#1b1b18] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
+                            >
+                                {{ destTokenLabel }}
                             </span>
                         </div>
                     </div>
-                    <div class="flex items-center gap-3">
-                        <input
-                            v-model="bridgeAmount"
-                            type="text"
-                            inputmode="decimal"
-                            placeholder="0.0"
-                            class="w-full bg-transparent text-2xl font-light text-[#1b1b18] outline-none placeholder:text-[#c4c4c0] dark:text-[#EDEDEC] dark:placeholder:text-[#555]"
-                            :class="{
-                                'text-red-500 dark:text-red-400':
-                                    amountExceedsBalance,
-                            }"
-                        />
+
+                    <!-- Fee -->
+                    <div
+                        v-if="bridgeFee"
+                        class="flex items-center justify-between rounded-b-lg bg-[#19140008] px-4 py-2 dark:bg-[#1a1a17]"
+                    >
                         <span
-                            class="shrink-0 rounded-full bg-[#19140010] px-3 py-1 text-xs font-medium text-[#1b1b18] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
+                            class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
                         >
-                            {{ sourceTokenLabel }}
+                            Bridge fee (1%)
+                        </span>
+                        <span
+                            class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
+                        >
+                            {{ bridgeFee }} {{ sourceTokenLabel }}
                         </span>
                     </div>
-                    <p
-                        v-if="amountExceedsBalance"
-                        class="mt-1 text-xs text-red-500 dark:text-red-400"
-                    >
-                        Insufficient balance
-                    </p>
-                </div>
 
-                <!-- Flip button -->
-                <div class="relative z-10 -my-2 flex justify-center">
+                    <!-- Submit -->
                     <button
-                        class="rounded-full border border-[#19140035] bg-[#FDFDFC] p-2 transition-transform hover:rotate-180 dark:border-[#3E3E3A] dark:bg-[#0a0a0a]"
-                        @click="flipDirection"
+                        class="mt-4 w-full rounded-lg bg-[#1b1b18] py-3 text-sm font-medium text-white transition-colors hover:bg-[#2d2d2a] disabled:opacity-50 dark:bg-[#EDEDEC] dark:text-[#0a0a0a] dark:hover:bg-[#d4d4d0]"
+                        :disabled="
+                            bridgeProcessing ||
+                            !bothWalletsConnected ||
+                            !bridgeAmount ||
+                            amountExceedsBalance
+                        "
+                        @click="handleBridgeSubmit"
                     >
-                        <ArrowDown
-                            class="h-4 w-4 text-[#1b1b18] dark:text-[#EDEDEC]"
-                        />
+                        <span
+                            v-if="bridgeProcessing"
+                            class="flex items-center justify-center gap-2"
+                        >
+                            <Loader2 class="h-4 w-4 animate-spin" />
+                            Processing...
+                        </span>
+                        <span v-else-if="!bothWalletsConnected">
+                            Connect both wallets
+                        </span>
+                        <span v-else-if="!bridgeAmount"> Enter amount </span>
+                        <span v-else-if="amountExceedsBalance">
+                            Insufficient balance
+                        </span>
+                        <span v-else> Bridge {{ sourceTokenLabel }} </span>
                     </button>
                 </div>
-
-                <!-- Destination -->
-                <div
-                    class="bg-[#f5f5f4] p-4 dark:bg-[#1a1a1a]"
-                    :class="bridgeFee ? 'rounded-t-lg' : 'rounded-lg'"
-                >
-                    <div class="mb-2 flex items-center justify-between">
-                        <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]"
-                            >To</span
-                        >
-                        <span
-                            class="text-xs font-medium text-[#1b1b18] dark:text-[#EDEDEC]"
-                        >
-                            {{ destLabel }}
-                        </span>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        <span
-                            class="text-2xl font-light text-[#1b1b18] dark:text-[#EDEDEC]"
-                        >
-                            {{ amountAfterFee ?? '0.0' }}
-                        </span>
-                        <span
-                            class="shrink-0 rounded-full bg-[#19140010] px-3 py-1 text-xs font-medium text-[#1b1b18] dark:bg-[#3E3E3A] dark:text-[#EDEDEC]"
-                        >
-                            {{ destTokenLabel }}
-                        </span>
-                    </div>
-                </div>
-
-                <!-- Fee -->
-                <div
-                    v-if="bridgeFee"
-                    class="flex items-center justify-between rounded-b-lg bg-[#19140008] px-4 py-2 dark:bg-[#1a1a17]"
-                >
-                    <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]">
-                        Bridge fee (1%)
-                    </span>
-                    <span class="text-xs text-[#706f6c] dark:text-[#A1A09A]">
-                        {{ bridgeFee }} {{ sourceTokenLabel }}
-                    </span>
-                </div>
-
-                <!-- Submit -->
-                <button
-                    class="mt-4 w-full rounded-lg bg-[#1b1b18] py-3 text-sm font-medium text-white transition-colors hover:bg-[#2d2d2a] disabled:opacity-50 dark:bg-[#EDEDEC] dark:text-[#0a0a0a] dark:hover:bg-[#d4d4d0]"
-                    :disabled="
-                        bridgeProcessing ||
-                        !bothWalletsConnected ||
-                        !bridgeAmount ||
-                        amountExceedsBalance
-                    "
-                    @click="handleBridgeSubmit"
-                >
-                    <span
-                        v-if="bridgeProcessing"
-                        class="flex items-center justify-center gap-2"
-                    >
-                        <Loader2 class="h-4 w-4 animate-spin" />
-                        Processing...
-                    </span>
-                    <span v-else-if="!bothWalletsConnected">
-                        Connect both wallets
-                    </span>
-                    <span v-else-if="!bridgeAmount"> Enter amount </span>
-                    <span v-else-if="amountExceedsBalance">
-                        Insufficient balance
-                    </span>
-                    <span v-else> Bridge {{ sourceTokenLabel }} </span>
-                </button>
-            </div>
+            </template>
 
             <!-- Bridge History -->
             <div

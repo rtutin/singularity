@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\BridgeController;
 use App\Http\Controllers\Api\WalletAttachController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\Auth\Web3LoginController;
+use App\Http\Controllers\BridgeAnalyticsController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\DaoController;
 use App\Http\Controllers\LinkController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\ProposalCommentController;
 use App\Http\Controllers\ProposalController;
 use App\Http\Controllers\ProposalVoteController;
 use App\Http\Controllers\Teams\TeamInvitationController;
+use App\Http\Middleware\EnsureBridgeAdmin;
 use App\Http\Middleware\EnsureTeamMembership;
 use Illuminate\Support\Facades\Route;
 
@@ -66,5 +68,10 @@ Route::middleware(['auth'])->group(function () {
 
 // Bridge (public — no auth required, controller handles optional user)
 Route::post('bridge/submit', [BridgeController::class, 'submit'])->name('bridge.submit');
+
+// Bridge analytics (admin only)
+Route::middleware(['auth', EnsureBridgeAdmin::class])
+    ->get('admin/bridge-analytics', [BridgeAnalyticsController::class, 'index'])
+    ->name('admin.bridge-analytics');
 
 require __DIR__.'/settings.php';

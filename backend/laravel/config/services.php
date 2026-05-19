@@ -42,7 +42,14 @@ return [
     'bridge' => [
         'evm_rpc_url' => env('BRIDGE_EVM_RPC_URL', env('CYBERIA_RPC_URL')),
         'evm_bridge_address' => env('BRIDGE_EVM_CONTRACT_ADDRESS'),
-        'relayer_private_key' => env('BRIDGE_RELAYER_PRIVATE_KEY'),
+        // The relayer is the same EOA as the contract deployer / owner.
+        // BRIDGE_RELAYER_PRIVATE_KEY exists for backwards compat; canonical
+        // name is DEPLOYER_PK. `?:` (not the env() default) is used because
+        // env('X', $fallback) only kicks in when X is unset, not when it's
+        // set to an empty string.
+        'relayer_private_key' => env('BRIDGE_RELAYER_PRIVATE_KEY') ?: env('DEPLOYER_PK'),
+        // Optional override. If empty, BridgeRelayerService derives the address
+        // from the private key automatically (EIP-55 checksum) and caches it.
         'relayer_address' => env('BRIDGE_RELAYER_ADDRESS'),
         'solana_rpc_url' => env('BRIDGE_SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com'),
         'solana_bridge_program' => env('BRIDGE_SOLANA_PROGRAM_ID'),

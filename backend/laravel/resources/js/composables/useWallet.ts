@@ -36,9 +36,12 @@ let listenersSetup = false;
 let restored = false;
 
 export const useWallet = () => {
-    const isMetaMaskInstalled = (): boolean => {
-        return typeof window !== 'undefined' && !!window.ethereum?.isMetaMask;
+    // Any EIP-1193 provider works — MetaMask, Phantom-on-EVM, Rabby, Coinbase, etc.
+    const isEvmProviderInstalled = (): boolean => {
+        return typeof window !== 'undefined' && !!window.ethereum;
     };
+
+    const isMetaMaskInstalled = isEvmProviderInstalled;
 
     /**
      * Restore wallet state from the authenticated user's saved wallet_address
@@ -46,7 +49,10 @@ export const useWallet = () => {
      * Should be called once on app mount.
      */
     const restore = async (savedAddress?: string | null): Promise<void> => {
-        if (restored || isConnected.value) return;
+        if (restored || isConnected.value) {
+            return;
+        }
+
         restored = true;
 
         // If user has a wallet_address saved in DB, set it immediately
@@ -79,8 +85,10 @@ export const useWallet = () => {
     };
 
     const connect = async (): Promise<string | null> => {
-        if (!isMetaMaskInstalled()) {
-            error.value = 'MetaMask is not installed. Please install it from metamask.io';
+        if (!isEvmProviderInstalled()) {
+            error.value =
+                'No EVM wallet detected. Install MetaMask, Phantom, or another EIP-1193 wallet.';
+
             return null;
         }
 
@@ -107,9 +115,11 @@ export const useWallet = () => {
 
             return address.value;
         } catch (err) {
-            error.value = err instanceof Error ? err.message : 'Failed to connect wallet';
+            error.value =
+                err instanceof Error ? err.message : 'Failed to connect wallet';
             isConnected.value = false;
             address.value = null;
+
             return null;
         } finally {
             isConnecting.value = false;
@@ -127,7 +137,9 @@ export const useWallet = () => {
     };
 
     const fetchBalance = async (): Promise<void> => {
-        if (!address.value || !window.ethereum) return;
+        if (!address.value || !window.ethereum) {
+            return;
+        }
 
         try {
             const provider = new BrowserProvider(window.ethereum);
@@ -139,13 +151,17 @@ export const useWallet = () => {
     };
 
     const fetchCyberBalance = async (): Promise<void> => {
-        if (!address.value || !window.ethereum) return;
+        if (!address.value || !window.ethereum) {
+            return;
+        }
 
         try {
             const provider = new BrowserProvider(window.ethereum);
             const contract = new Contract(CYBER_CONTRACT, ERC20_ABI, provider);
 
-            const balanceRaw = (await contract.balanceOf(address.value)) as bigint;
+            const balanceRaw = (await contract.balanceOf(
+                address.value,
+            )) as bigint;
             const decimals = (await contract.decimals()) as number;
             const symbol = (await contract.symbol()) as string;
 
@@ -162,7 +178,9 @@ export const useWallet = () => {
     };
 
     const fetchChainId = async (): Promise<void> => {
-        if (!window.ethereum) return;
+        if (!window.ethereum) {
+            return;
+        }
 
         try {
             const chainIdHex = (await window.ethereum.request({
@@ -177,6 +195,7 @@ export const useWallet = () => {
     const signMessage = async (message: string): Promise<string | null> => {
         if (!address.value || !window.ethereum) {
             error.value = 'Wallet not connected';
+
             return null;
         }
 
@@ -188,17 +207,23 @@ export const useWallet = () => {
 
             return signature;
         } catch (err) {
-            error.value = err instanceof Error ? err.message : 'Failed to sign message';
+            error.value =
+                err instanceof Error ? err.message : 'Failed to sign message';
+
             return null;
         }
     };
 
     const setupListeners = (): void => {
-        if (!window.ethereum || listenersSetup) return;
+        if (!window.ethereum || listenersSetup) {
+            return;
+        }
+
         listenersSetup = true;
 
         window.ethereum.on('accountsChanged', (accounts: unknown) => {
             const accs = accounts as string[];
+
             if (accs.length === 0) {
                 disconnect();
             } else if (accs[0] !== address.value) {
@@ -220,7 +245,10 @@ export const useWallet = () => {
     };
 
     const removeListeners = (): void => {
-        if (!window.ethereum) return;
+        if (!window.ethereum) {
+            return;
+        }
+
         listenersSetup = false;
 
         window.ethereum.removeAllListeners?.('accountsChanged');
@@ -241,6 +269,7 @@ export const useWallet = () => {
         error,
         cyberBalance,
         isMetaMaskInstalled,
+        isEvmProviderInstalled,
         connect,
         disconnect,
         restore,
