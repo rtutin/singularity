@@ -364,6 +364,32 @@ function findBestRoute(graph, fromToken, toToken, amountIn, maxHops) {
   };
 }
 
+// Does a pool path of at most maxHops edges connect the two tokens, ignoring
+// reserves and amounts? Used only to explain why findBestRoute came back empty:
+// a topology hit means the pools exist but the trade rounds to 0 somewhere
+// (pool too thin / low-decimal token), versus a genuine missing-pool path.
+function isRouteReachable(graph, fromToken, toToken, maxHops) {
+  const from = fromToken.toLowerCase();
+  const to = toToken.toLowerCase();
+  if (from === to) return true;
+  let frontier = new Set([from]);
+  const seen = new Set([from]);
+  for (let depth = 0; depth < maxHops; depth++) {
+    const next = new Set();
+    for (const node of frontier) {
+      for (const edge of graph.adjacency.get(node) || []) {
+        if (edge.to === to) return true;
+        if (!seen.has(edge.to)) {
+          seen.add(edge.to);
+          next.add(edge.to);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return false;
+}
+
 async function buyToken({ publicClient, walletClient, account, config, token, graph, dryRun }) {
   const { symbol, decimals } = await readTokenMeta(publicClient, token);
   const amountIn = parseEther(String(token.spendCyber));
@@ -375,6 +401,12 @@ async function buyToken({ publicClient, walletClient, account, config, token, gr
     route = findBestRoute(graph, config.wrappedNative, token.address, amountIn, config.maxHops);
   }
   if (!route) {
+    if (isRouteReachable(graph, config.wrappedNative, token.address, config.maxHops)) {
+      throw new Error(
+        `${symbol}: pools exist but ${formatEther(amountIn)} CYBER is too small for this route ` +
+          `(output rounds to 0 at some hop — pool too thin or low-decimal token). Raise spendCyber.`
+      );
+    }
     throw new Error(`${symbol}: no route from WCYBER through existing pools (within ${config.maxHops} hops)`);
   }
 

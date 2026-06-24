@@ -69,30 +69,30 @@
     {
       "symbol": "TRUR",
       "address": "0x6D056e56f5D90ed5680f0335D80E112799a735C8",
-      "spendCyber": "0.01",
+      "spendCyber": "0.1",
       "enabled": true,
-      "note": "No direct WCYBER pool; bought multi-hop via SILVER->RUB. Thin route - expect high price impact."
+      "note": "2-decimal token, multi-hop via SILVER->RUB. Dust route; spend kept above the rounding floor (0.01 CYBER yielded 0 base units). Expect severe price impact."
     },
     {
       "symbol": "TGLD",
       "address": "0xE2A45069C3e7897CAB592bEd389764e6eCf3b8a5",
-      "spendCyber": "0.01",
+      "spendCyber": "0.1",
       "enabled": true,
-      "note": "No direct WCYBER pool; bought multi-hop via SILVER->RUB. Thin route - expect high price impact."
+      "note": "2-decimal token, multi-hop via SILVER->RUB. Dust route; spend kept above the rounding floor (0.01 CYBER yielded 0 base units). Expect severe price impact."
     },
     {
       "symbol": "TMOS",
       "address": "0x3352254390526624a140B06E7D2dDA8BA85a9E89",
-      "spendCyber": "0.01",
+      "spendCyber": "0.1",
       "enabled": true,
-      "note": "No direct WCYBER pool; bought multi-hop via SILVER->RUB. Thin route - expect high price impact."
+      "note": "2-decimal token, multi-hop via SILVER->RUB. Dust route; spend kept above the rounding floor (0.01 CYBER yielded 0 base units). Expect severe price impact."
     },
     {
       "symbol": "TOFZ",
       "address": "0x46A6f512885De25AaefBf5A5F842ba378700Fe22",
-      "spendCyber": "0.01",
+      "spendCyber": "0.1",
       "enabled": true,
-      "note": "No direct WCYBER pool; bought multi-hop via SILVER->RUB. Thin route - expect high price impact."
+      "note": "2-decimal token, multi-hop via SILVER->RUB. Dust route; spend kept above the rounding floor (0.01 CYBER yielded 0 base units). Expect severe price impact."
     },
     {
       "symbol": "GOLD",

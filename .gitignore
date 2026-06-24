@@ -13,3 +13,5 @@ frontend/ritual/.env.*
 .claude/
 .codex
 .codex/
+
+key
